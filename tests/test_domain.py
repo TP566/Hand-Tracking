@@ -80,3 +80,35 @@ def test_loop_points_clamped_to_video():
 def test_fit_cover_crops_to_target_aspect():
     out = fit_cover(np.zeros((1080, 1920, 3), np.uint8), 640, 480)
     assert out.shape == (480, 640, 3)
+
+
+def make_manager(clock):
+    from domain import DomainManager
+    return DomainManager({
+        "void": DomainPlayer(StubSource(), loop_start_sec=5, loop_end_sec=None, clock=clock),
+        "shrine": DomainPlayer(StubSource(), loop_start_sec=2, loop_end_sec=None, clock=clock),
+    })
+
+
+def test_manager_opens_and_closes_same_domain():
+    manager = make_manager(FakeClock())
+    manager.on_sign("void")
+    assert manager.active == "void" and manager.state is DomainState.OPENING
+    assert manager.current_frame(64, 36) is not None
+    manager.on_sign("void")
+    assert manager.active is None and manager.state is DomainState.IDLE
+    assert manager.current_frame(64, 36) is None
+
+
+def test_manager_ignores_other_sign_while_open():
+    manager = make_manager(FakeClock())
+    manager.on_sign("void")
+    manager.on_sign("shrine")
+    assert manager.active == "void"
+    assert not manager.players["shrine"].active
+
+
+def test_manager_ignores_unknown_or_disabled_sign():
+    manager = make_manager(FakeClock())
+    manager.on_sign("missing")
+    assert manager.active is None

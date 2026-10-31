@@ -3,12 +3,25 @@
   "width": 1280,
   "height": 720,
   "fps": 30,
-  "video_path": "",
-  "loop_start_sec": 9.5,
-  "loop_end_sec": null,
   "hold_frames": 12,
+  "miss_tolerance": 3,
   "cooldown_sec": 1.5,
-  "hotkey": "<ctrl>+<alt>+d",
   "mirror_preview": true,
-  "show_preview": true
+  "show_preview": true,
+  "domains": {
+    "unlimited_void": {
+      "video": "",
+      "keywords": ["gojo", "void", "unlimited"],
+      "loop_start_sec": 9.5,
+      "loop_end_sec": null,
+      "hotkey": "<ctrl>+<alt>+d"
+    },
+    "malevolent_shrine": {
+      "video": "",
+      "keywords": ["sukuna", "shrine", "malevolent"],
+      "loop_start_sec": 3.8,
+      "loop_end_sec": null,
+      "hotkey": "<ctrl>+<alt>+s"
+    }
+  }
 }

@@ -4,49 +4,48 @@ import json
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 import cv2
-import mediapipe as mp
 import numpy as np
 import pyvirtualcam
-from mediapipe.tasks.python import BaseOptions, vision
 from pynput import keyboard
 
 import setup_models
+import video_cache
 from compositor import PersonSegmenter, composite
-from domain import DomainPlayer, VideoFileSource
+from domain import DomainManager, DomainPlayer, VideoFileSource
 from gesture_trigger import HoldTrigger
+from hand_detector import HandDetector, draw_hand, draw_text
 from hand_signs import GESTURES
 
 ROOT = Path(__file__).parent
 MODELS = ROOT / "models"
-DETECT_WIDTH = 640
+VIDEOS = ROOT / "videos"
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
-HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
-    (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15), (15, 16),
-    (13, 17), (17, 18), (18, 19), (19, 20), (0, 17),
-]
+SIGN_TITLES = {"unlimited_void": "Unlimited Void", "malevolent_shrine": "Malevolent Shrine"}
 
 
 def load_config() -> dict:
     return json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
 
 
-def find_video(cfg: dict) -> Path:
-    """The configured video, or the first video found in videos/ or the project folder."""
-    if cfg.get("video_path"):
-        path = ROOT / cfg["video_path"]
+def find_video(name: str, domain_cfg: dict) -> Optional[Path]:
+    """The configured video, or the first file in videos/ (or the project folder) named with a keyword."""
+    if domain_cfg.get("video"):
+        path = ROOT / domain_cfg["video"]
         if path.exists():
             return path
-        raise SystemExit(f"Video not found: {path}\nCheck 'video_path' in config.json, "
-                         "or set it to \"\" to use the first video in the videos folder.")
-    for folder in (ROOT / "videos", ROOT):
-        for ext in VIDEO_EXTENSIONS:
-            found = sorted(folder.glob(f"*{ext}"))
-            if found:
-                return found[0]
-    raise SystemExit("No Domain video found.\nPut your video file (.mp4) in the 'videos' folder and run again.")
+        print(f"[{name}] Video not found: {path}. Check 'video' in config.json.")
+        return None
+    keywords = [k.lower() for k in domain_cfg.get("keywords", [])]
+    for folder in (VIDEOS, ROOT):
+        for path in sorted(folder.iterdir()) if folder.exists() else []:
+            if path.suffix.lower() in VIDEO_EXTENSIONS and any(k in path.name.lower() for k in keywords):
+                return path
+    print(f"[{name}] No video found: put a video whose file name contains one of "
+          f"{keywords} in the 'videos' folder. This sign is disabled for now.")
+    return None
 
 
 def ensure_models() -> None:
@@ -67,79 +66,65 @@ def open_camera(cfg: dict) -> cv2.VideoCapture:
     return cap
 
 
-class HandDetector:
-    def __init__(self, model_path: str):
-        options = vision.HandLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=model_path),
-            running_mode=vision.RunningMode.VIDEO,
-            num_hands=2,
-        )
-        self.landmarker = vision.HandLandmarker.create_from_options(options)
-
-    def detect(self, frame_bgr: np.ndarray, timestamp_ms: int) -> list[tuple[list[tuple[float, float]], str]]:
-        """Return (landmarks in pixels, handedness) for each detected hand."""
-        h, w = frame_bgr.shape[:2]
-        # Landmarks are normalised, so detecting on a smaller copy is cheaper and loses little.
-        if w > DETECT_WIDTH:
-            frame_bgr = cv2.resize(frame_bgr, (DETECT_WIDTH, round(h * DETECT_WIDTH / w)),
-                                   interpolation=cv2.INTER_AREA)
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        result = self.landmarker.detect_for_video(
-            mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp_ms)
-        hands = []
-        for landmarks, handedness in zip(result.hand_landmarks, result.handedness):
-            points = [(p.x * w, p.y * h) for p in landmarks]
-            hands.append((points, handedness[0].category_name if handedness else ""))
-        return hands
-
-    def close(self) -> None:
-        self.landmarker.close()
+def build_domains(cfg: dict, width: int, height: int) -> DomainManager:
+    players = {}
+    for name, domain_cfg in cfg["domains"].items():
+        video = find_video(name, domain_cfg)
+        if video is None:
+            continue
+        video = video_cache.prepare(video, width, height, VIDEOS / ".cache")
+        players[name] = DomainPlayer(VideoFileSource(str(video)), domain_cfg["loop_start_sec"],
+                                     domain_cfg.get("loop_end_sec"))
+        print(f"[{name}] {video.name}  (hotkey {domain_cfg['hotkey']})")
+    if not players:
+        raise SystemExit("No Domain videos found.\nPut your videos in the 'videos' folder "
+                         "(file names containing 'gojo' or 'sukuna', for example) and run again.")
+    return DomainManager(players)
 
 
-def draw_hand(img: np.ndarray, points: list[tuple[float, float]], color: tuple[int, int, int]) -> None:
-    pts = [(int(x), int(y)) for x, y in points]
-    for a, b in HAND_CONNECTIONS:
-        cv2.line(img, pts[a], pts[b], color, 2)
-    for p in pts:
-        cv2.circle(img, p, 3, (255, 255, 255), -1)
-
-
-def draw_status(img: np.ndarray, lines: list[str], progress: float) -> None:
-    for i, text in enumerate(lines):
-        org = (12, 28 + 26 * i)
-        cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4)
-        cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    if progress > 0:
-        top = 28 + 26 * len(lines)
-        cv2.rectangle(img, (12, top), (12 + int(img.shape[1] // 3 * progress), top + 10), (255, 80, 200), -1)
+def draw_status(img: np.ndarray, lines: list[str], bars: list[tuple[str, float, bool]]) -> None:
+    row = 0
+    for text in lines:
+        draw_text(img, text, row)
+        row += 1
+    for label, progress, enabled in bars:
+        y = draw_text(img, label if enabled else f"{label} (no video)", row,
+                      (255, 255, 255) if enabled else (150, 150, 150))
+        if progress > 0:
+            cv2.rectangle(img, (240, y - 14), (240 + int(200 * progress), y - 2), (255, 80, 200), -1)
+        row += 1
 
 
 def main() -> None:
     cfg = load_config()
-    video = find_video(cfg)
     ensure_models()
-    player = DomainPlayer(VideoFileSource(str(video)), cfg["loop_start_sec"], cfg.get("loop_end_sec"))
-    triggers = {name: HoldTrigger(cfg["hold_frames"], cfg["cooldown_sec"]) for name in GESTURES}
-    # Gesture name -> action. Future PyAutoGUI actions are registered here.
-    actions = {"unlimited_void": player.toggle}
-
     cap = open_camera(cfg)
     ok, frame = cap.read()
     height, width = frame.shape[:2]
-    print(f"Domain video: {video.name}")
+    domains = build_domains(cfg, width, height)
 
+    triggers = {name: HoldTrigger(cfg["hold_frames"], cfg["cooldown_sec"], cfg.get("miss_tolerance", 3))
+                for name in GESTURES}
     hands = HandDetector(str(MODELS / "hand_landmarker.task"))
     segmenter = PersonSegmenter(str(MODELS / "selfie_segmenter.tflite"))
 
-    hotkey_pressed = threading.Event()
-    hotkeys = keyboard.GlobalHotKeys({cfg["hotkey"]: hotkey_pressed.set})
+    # Hotkeys fire on pynput's thread; hand them to the main loop through a queue-like list.
+    hotkey_hits: list[str] = []
+    lock = threading.Lock()
+
+    def on_hotkey(name: str):
+        def fire():
+            with lock:
+                hotkey_hits.append(name)
+        return fire
+
+    hotkeys = keyboard.GlobalHotKeys({d["hotkey"]: on_hotkey(name) for name, d in cfg["domains"].items()})
     hotkeys.start()
 
     last_ts = 0
     fps_avg = 0.0
     prev_time = time.monotonic()
-    print(f"Camera {width}x{height}. Select 'OBS Virtual Camera' in Discord. "
-          f"Hotkey {cfg['hotkey']} toggles the Domain, 'q' in the preview quits.")
+    print(f"Camera {width}x{height}. Select 'OBS Virtual Camera' in Discord. Press 'q' in the preview to quit.")
 
     try:
         try:
@@ -161,14 +146,14 @@ def main() -> None:
 
                 detected = hands.detect(frame, ts)
                 for name, detector in GESTURES.items():
-                    active = any(detector(points, side) for points, side in detected)
-                    if triggers[name].update(active):
-                        actions[name]()
-                if hotkey_pressed.is_set():
-                    hotkey_pressed.clear()
-                    player.toggle()
+                    if triggers[name].update(detector(detected)):
+                        domains.on_sign(name)
+                with lock:
+                    pending, hotkey_hits[:] = list(hotkey_hits), []
+                for name in pending:
+                    domains.on_sign(name)
 
-                background = player.current_frame(width, height)
+                background = domains.current_frame(width, height)
                 if background is None:
                     output = frame
                     segmenter.reset()
@@ -181,12 +166,15 @@ def main() -> None:
                     fps_avg = 0.9 * fps_avg + 0.1 / max(now - prev_time, 1e-6)
                     prev_time = now
                     preview = output.copy()
-                    for points, _ in detected:
-                        draw_hand(preview, points, (255, 80, 200))
+                    for hand in detected:
+                        draw_hand(preview, hand.image, (255, 80, 200))
                     if cfg.get("mirror_preview", True):
                         preview = cv2.flip(preview, 1)
-                    draw_status(preview, [f"Domain: {player.state.value}", f"FPS: {fps_avg:.0f}"],
-                                triggers["unlimited_void"].progress)
+                    active = SIGN_TITLES.get(domains.active, domains.active) if domains.active else "none"
+                    draw_status(preview,
+                                [f"Domain: {active} ({domains.state.value})", f"FPS: {fps_avg:.0f}"],
+                                [(SIGN_TITLES.get(n, n), triggers[n].progress, n in domains.players)
+                                 for n in GESTURES])
                     cv2.imshow("Domain Expansion (preview)", preview)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break

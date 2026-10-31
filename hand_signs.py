@@ -1,12 +1,14 @@
-"""Rule-based hand sign detectors over MediaPipe's 21 hand landmarks.
+"""Rule-based hand sign detectors over MediaPipe hand landmarks.
 
-Each detector takes ``landmarks`` (21 ``(x, y)`` points in pixel coordinates,
-y pointing down) and ``handedness`` ("Left"/"Right", may be unused) and
-returns ``True`` when the sign is present.
+Each detector takes the list of hands seen in the current frame and returns
+``True`` when its sign is present. A ``Hand`` carries the 21 landmarks in image
+pixels (y pointing down) and, when available, MediaPipe's 3D world landmarks
+in metres, which keep finger geometry readable when the hand is seen edge-on.
 """
 
 import math
-from typing import Callable, Sequence
+from dataclasses import dataclass
+from typing import Callable, Optional, Sequence
 
 Point = Sequence[float]
 
@@ -21,15 +23,64 @@ FINGERS = {
 
 # Tip must be this much farther from the wrist than the PIP joint to count as extended.
 EXTENDED_RATIO = 1.1
+# A "raised" finger (may be hooked) has its tip this much farther from the wrist than its MCP.
+RAISED_RATIO = 1.25
 # Crossed tips must be closer than this fraction of the palm length.
 CROSS_MAX_TIP_GAP = 0.45
 # Tips must be swapped by at least this fraction of the palm length (filters jitter
 # when the two fingers are merely held together).
 CROSS_MIN_SWAP = 0.03
+CROSS_MIN_SWAP_3D = 0.03
+
+# Malevolent Shrine: both hands point up within this angle of vertical...
+SHRINE_MAX_TILT_DEG = 60.0
+# ...an index or middle fingertip of each hand meet (fraction of mean palm length)...
+SHRINE_APEX_GAP = 0.5
+# ...and the wrists are spread apart, unlike prayer hands.
+SHRINE_MIN_WRIST_GAP = 0.9
+
+
+@dataclass
+class Hand:
+    image: Sequence[Point]
+    world: Optional[Sequence[Point]] = None
+    handedness: str = ""
 
 
 def _dist(a: Point, b: Point) -> float:
-    return math.hypot(a[0] - b[0], a[1] - b[1])
+    return math.dist(a, b)
+
+
+def _sub(a: Point, b: Point) -> list[float]:
+    return [x - y for x, y in zip(a, b)]
+
+
+def _dot(a: Point, b: Point) -> float:
+    return sum(x * y for x, y in zip(a, b))
+
+
+def _unit(v: Point) -> list[float]:
+    n = math.sqrt(_dot(v, v)) or 1e-9
+    return [x / n for x in v]
+
+
+def _segment_dist(p: Point, a: Point, b: Point) -> float:
+    ab, ap = _sub(b, a), _sub(p, a)
+    t = max(0.0, min(1.0, _dot(ap, ab) / (_dot(ab, ab) or 1e-9)))
+    return _dist(p, [x + t * d for x, d in zip(a, ab)])
+
+
+def tips_close(lm: Sequence[Point], a: str, b: str, max_gap: float) -> bool:
+    """Either finger's tip lies near the other finger's PIP-to-tip segment.
+
+    Tip-to-tip distance is too strict for a hooked finger, which rests partway
+    along the other one.
+    """
+    _, pip_a, _, tip_a = FINGERS[a]
+    _, pip_b, _, tip_b = FINGERS[b]
+    gap = min(_segment_dist(lm[tip_b], lm[pip_a], lm[tip_a]),
+              _segment_dist(lm[tip_a], lm[pip_b], lm[tip_b]))
+    return gap < max_gap
 
 
 def palm_length(lm: Sequence[Point]) -> float:
@@ -37,9 +88,15 @@ def palm_length(lm: Sequence[Point]) -> float:
     return _dist(lm[WRIST], lm[FINGERS["middle"][0]]) or 1e-6
 
 
+# These finger tests use distances only, so they work on 2D image or 3D world points.
 def finger_extended(lm: Sequence[Point], finger: str) -> bool:
     _, pip, _, tip = FINGERS[finger]
     return _dist(lm[WRIST], lm[tip]) > _dist(lm[WRIST], lm[pip]) * EXTENDED_RATIO
+
+
+def finger_raised(lm: Sequence[Point], finger: str) -> bool:
+    mcp, _, _, tip = FINGERS[finger]
+    return _dist(lm[WRIST], lm[tip]) > _dist(lm[WRIST], lm[mcp]) * RAISED_RATIO
 
 
 def finger_curled(lm: Sequence[Point], finger: str) -> bool:
@@ -48,7 +105,7 @@ def finger_curled(lm: Sequence[Point], finger: str) -> bool:
 
 
 def side_offset(lm: Sequence[Point], idx: int) -> float:
-    """Signed distance of a landmark across the palm, in a hand-local frame.
+    """Signed distance of a landmark across the palm, in a hand-local 2D frame.
 
     The frame's "up" axis runs from the wrist to the middle MCP, so the value
     is independent of how the hand is rotated in the image.
@@ -72,21 +129,70 @@ def fingers_crossed(lm: Sequence[Point], a: str = "index", b: str = "middle") ->
     knuckle_order = side_offset(lm, FINGERS[a][0]) - side_offset(lm, FINGERS[b][0])
     tip_order = side_offset(lm, FINGERS[a][3]) - side_offset(lm, FINGERS[b][3])
     swapped = knuckle_order * tip_order < 0 and abs(tip_order) >= CROSS_MIN_SWAP * scale
-    close = _dist(lm[FINGERS[a][3]], lm[FINGERS[b][3]]) < CROSS_MAX_TIP_GAP * scale
-    return swapped and close
+    return swapped and tips_close(lm, a, b, CROSS_MAX_TIP_GAP * scale)
 
 
-def is_unlimited_void(lm: Sequence[Point], handedness: str = "") -> bool:
-    """Gojo's Unlimited Void: index and middle extended and crossed, ring and pinky curled."""
-    return (
-        finger_extended(lm, "index")
-        and finger_extended(lm, "middle")
-        and finger_curled(lm, "ring")
-        and finger_curled(lm, "pinky")
-        and fingers_crossed(lm, "index", "middle")
-    )
+def palm_across_axis(world: Sequence[Point]) -> list[float]:
+    """Unit vector across the palm (pinky MCP to index MCP), perpendicular to wrist->middle MCP."""
+    up = _unit(_sub(world[FINGERS["middle"][0]], world[WRIST]))
+    across = _sub(world[FINGERS["index"][0]], world[FINGERS["pinky"][0]])
+    across = _sub(across, [u * _dot(across, up) for u in up])
+    return _unit(across)
 
 
-GESTURES: dict[str, Callable[[Sequence[Point], str], bool]] = {
+def fingers_crossed_3d(world: Sequence[Point], a: str = "index", b: str = "middle") -> bool:
+    """3D version of ``fingers_crossed``: compares order along the palm's across axis.
+
+    Because MediaPipe estimates depth, this still works when the hand is seen
+    edge-on and the two fingers overlap in the image.
+    """
+    scale = palm_length(world)
+    across = palm_across_axis(world)
+    knuckle_order = _dot(_sub(world[FINGERS[a][0]], world[FINGERS[b][0]]), across)
+    tip_order = _dot(_sub(world[FINGERS[a][3]], world[FINGERS[b][3]]), across)
+    swapped = knuckle_order * tip_order < 0 and abs(tip_order) >= CROSS_MIN_SWAP_3D * scale
+    return swapped and tips_close(world, a, b, CROSS_MAX_TIP_GAP * scale)
+
+
+def _void_shape(lm: Sequence[Point]) -> bool:
+    # The middle finger only has to be raised: from the side it hooks over the index.
+    return (finger_extended(lm, "index") and finger_raised(lm, "middle")
+            and finger_curled(lm, "ring") and finger_curled(lm, "pinky"))
+
+
+def is_unlimited_void(hands: Sequence[Hand]) -> bool:
+    """Gojo's Unlimited Void: index up, middle crossed over it, ring and pinky curled."""
+    for hand in hands:
+        shape = _void_shape(hand.image) or (hand.world is not None and _void_shape(hand.world))
+        crossed = fingers_crossed(hand.image) or (hand.world is not None and fingers_crossed_3d(hand.world))
+        if shape and crossed:
+            return True
+    return False
+
+
+def _pointing_up(lm: Sequence[Point]) -> bool:
+    ux, uy = _sub(lm[FINGERS["middle"][0]], lm[WRIST])[:2]
+    norm = math.hypot(ux, uy) or 1e-6
+    return -uy / norm >= math.cos(math.radians(SHRINE_MAX_TILT_DEG))
+
+
+def is_malevolent_shrine(hands: Sequence[Hand]) -> bool:
+    """Sukuna's Malevolent Shrine: two upright hands meeting at the fingertips in an "A" shape."""
+    if len(hands) != 2:
+        return False
+    a, b = hands[0].image, hands[1].image
+    if not (_pointing_up(a) and _pointing_up(b)):
+        return False
+    scale = (palm_length(a) + palm_length(b)) / 2
+    tips = (FINGERS["index"][3], FINGERS["middle"][3])
+    gap, ta, tb = min((_dist(a[i], b[j]), i, j) for i in tips for j in tips)
+    apex_y = (a[ta][1] + b[tb][1]) / 2
+    wrists_apart = _dist(a[WRIST], b[WRIST]) > SHRINE_MIN_WRIST_GAP * scale
+    apex_above = apex_y < min(a[WRIST][1], b[WRIST][1]) - 0.5 * scale
+    return gap < SHRINE_APEX_GAP * scale and wrists_apart and apex_above
+
+
+GESTURES: dict[str, Callable[[Sequence[Hand]], bool]] = {
     "unlimited_void": is_unlimited_void,
+    "malevolent_shrine": is_malevolent_shrine,
 }

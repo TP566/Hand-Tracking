@@ -101,3 +101,29 @@ class DomainPlayer:
                 return self._cache_frame
             self._cache_key, self._cache_frame = key, fit_cover(frame, width, height)
         return self._cache_frame
+
+
+class DomainManager:
+    """Owns one player per Domain; only one Domain can be open at a time."""
+
+    def __init__(self, players: dict[str, DomainPlayer]):
+        self.players = players
+        self.active: Optional[str] = None
+
+    @property
+    def state(self) -> DomainState:
+        return self.players[self.active].state if self.active else DomainState.IDLE
+
+    def on_sign(self, name: str) -> None:
+        """Open ``name`` if nothing is open, close it if it is the open one, else ignore."""
+        if name not in self.players:
+            return
+        if self.active is None:
+            self.players[name].toggle()
+            self.active = name
+        elif self.active == name:
+            self.players[name].toggle()
+            self.active = None
+
+    def current_frame(self, width: int, height: int) -> Optional[np.ndarray]:
+        return self.players[self.active].current_frame(width, height) if self.active else None
