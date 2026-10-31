@@ -1,0 +1,14 @@
+{
+  "camera_index": 0,
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "video_path": "Gojo Satoru Domain Expansion.mp4",
+  "loop_start_sec": 9.5,
+  "loop_end_sec": null,
+  "hold_frames": 12,
+  "cooldown_sec": 1.5,
+  "hotkey": "<ctrl>+<alt>+d",
+  "mirror_preview": true,
+  "show_preview": true
+}
