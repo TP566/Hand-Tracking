@@ -16,7 +16,7 @@ Make Gojo's **Unlimited Void** hand sign in front of your webcam and your backgr
 |---|---|
 | A **webcam** | Built-in laptop cameras work fine |
 | **Python 3.10 or newer** | [python.org/downloads](https://www.python.org/downloads/). During install, tick **"Add python.exe to PATH"** |
-| **OBS Studio** | [obsproject.com](https://obsproject.com/). Installs the virtual camera this app sends video to |
+| **OBS Studio** | [obsproject.com](https://obsproject.com/). Installing it adds the virtual camera this app sends video to; OBS itself stays closed |
 | A **Domain video** | Any `.mp4` of the Domain Expansion. Not included in this repository |
 
 ### Step 1: Download the project
@@ -25,13 +25,11 @@ Either:
 - Click the green **Code** button on GitHub → **Download ZIP**, then unzip it somewhere (for example `Documents\Hand-Tracking`), **or**
 - With Git: `git clone https://github.com/TP566/Hand-Tracking.git`
 
-### Step 2: Turn on the OBS Virtual Camera (once)
+### Step 2: Install OBS Studio
 
-1. Open **OBS Studio**.
-2. Click **Start Virtual Camera** (bottom right), then **Stop Virtual Camera**.
-3. Close OBS.
+Just install it; that adds the **OBS Virtual Camera** device to your computer. You don't need to open OBS to use this app.
 
-You only do this once per computer. OBS does **not** need to be open when you use the app.
+> **Important:** do **not** click **Start Virtual Camera** in OBS. This app sends its video into the OBS Virtual Camera by itself, and only one program can do that at a time. If OBS's virtual camera is on, the app can't start, and if the app is running, OBS shows *"Failed to start virtual camera"*. Both are normal.
 
 ### Step 3: Run the setup (once)
 
@@ -82,7 +80,8 @@ Other apps have the same option in their camera or video settings.
 |---|---|
 | `setup.bat` says **Python was not found** | Install Python and tick **"Add python.exe to PATH"**. Then open a new window and run `setup.bat` again |
 | **Could not open camera** | Close other apps using the webcam (Discord, Zoom, Camera app). If you have more than one camera, set `camera_index` in `config.json` to `1`, `2`... |
-| **OBS Virtual Camera is not available** | Do Step 2 again. If OBS isn't installed, install it first |
+| **Could not start the OBS Virtual Camera** | If OBS is open with the virtual camera on, click **Stop Virtual Camera** (or close OBS), then run the app again. If OBS isn't installed, install it |
+| OBS says **"Failed to start virtual camera"** | Normal while the app is running: the app is already using the virtual camera. You don't need OBS's button at all |
 | **No Domain video found** | Put an `.mp4` in the `videos` folder |
 | Discord shows a **black screen** or "OBS Virtual Camera" shows nothing | Make sure the app is running (preview window open) *before* selecting the camera in Discord |
 | The sign **never triggers** | Check that your hand is outlined in the preview, improve lighting, and cross the fingers more clearly. You can lower `hold_frames` in `config.json` |

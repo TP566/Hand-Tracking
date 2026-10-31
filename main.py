@@ -146,9 +146,10 @@ def main() -> None:
             cam_ctx = pyvirtualcam.Camera(width, height, cfg["fps"], backend="obs",
                                           fmt=pyvirtualcam.PixelFormat.BGR)
         except RuntimeError as e:
-            raise SystemExit(f"OBS Virtual Camera is not available ({e}).\n"
-                             "Install OBS Studio, open it, click 'Start Virtual Camera' once, "
-                             "then stop it and close OBS.") from None
+            raise SystemExit(f"Could not start the OBS Virtual Camera ({e}).\n"
+                             "- If OBS is open with 'Start Virtual Camera' on, click 'Stop Virtual Camera'. "
+                             "This app feeds the virtual camera itself; only one program can at a time.\n"
+                             "- If OBS Studio is not installed, install it from https://obsproject.com/") from None
         with cam_ctx as cam:
             while True:
                 ok, frame = cap.read()
