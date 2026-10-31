@@ -3,7 +3,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 models/
-videos/
+videos/*
+!videos/PUT_YOUR_VIDEO_HERE.txt
 *.mp4
 *.mov
+*.mkv
 *.webm
+*.avi

@@ -12,6 +12,7 @@ import pyvirtualcam
 from mediapipe.tasks.python import BaseOptions, vision
 from pynput import keyboard
 
+import setup_models
 from compositor import PersonSegmenter, composite
 from domain import DomainPlayer, VideoFileSource
 from gesture_trigger import HoldTrigger
@@ -20,6 +21,7 @@ from hand_signs import GESTURES
 ROOT = Path(__file__).parent
 MODELS = ROOT / "models"
 DETECT_WIDTH = 640
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
     (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15), (15, 16),
@@ -29,6 +31,40 @@ HAND_CONNECTIONS = [
 
 def load_config() -> dict:
     return json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+
+
+def find_video(cfg: dict) -> Path:
+    """The configured video, or the first video found in videos/ or the project folder."""
+    if cfg.get("video_path"):
+        path = ROOT / cfg["video_path"]
+        if path.exists():
+            return path
+        raise SystemExit(f"Video not found: {path}\nCheck 'video_path' in config.json, "
+                         "or set it to \"\" to use the first video in the videos folder.")
+    for folder in (ROOT / "videos", ROOT):
+        for ext in VIDEO_EXTENSIONS:
+            found = sorted(folder.glob(f"*{ext}"))
+            if found:
+                return found[0]
+    raise SystemExit("No Domain video found.\nPut your video file (.mp4) in the 'videos' folder and run again.")
+
+
+def ensure_models() -> None:
+    if not all((MODELS / name).exists() for name in setup_models.MODELS):
+        print("Downloading MediaPipe models (first run only)...")
+        setup_models.main()
+
+
+def open_camera(cfg: dict) -> cv2.VideoCapture:
+    cap = cv2.VideoCapture(cfg["camera_index"], cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg["width"])
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg["height"])
+    cap.set(cv2.CAP_PROP_FPS, cfg["fps"])
+    if not cap.isOpened() or not cap.read()[0]:
+        raise SystemExit(f"Could not open camera {cfg['camera_index']}.\n"
+                         "Close any app using the webcam (Discord, Zoom, Camera app), "
+                         "or try another 'camera_index' in config.json (0, 1, 2...).")
+    return cap
 
 
 class HandDetector:
@@ -80,20 +116,17 @@ def draw_status(img: np.ndarray, lines: list[str], progress: float) -> None:
 
 def main() -> None:
     cfg = load_config()
-    player = DomainPlayer(VideoFileSource(str(ROOT / cfg["video_path"])),
-                          cfg["loop_start_sec"], cfg.get("loop_end_sec"))
+    video = find_video(cfg)
+    ensure_models()
+    player = DomainPlayer(VideoFileSource(str(video)), cfg["loop_start_sec"], cfg.get("loop_end_sec"))
     triggers = {name: HoldTrigger(cfg["hold_frames"], cfg["cooldown_sec"]) for name in GESTURES}
     # Gesture name -> action. Future PyAutoGUI actions are registered here.
     actions = {"unlimited_void": player.toggle}
 
-    cap = cv2.VideoCapture(cfg["camera_index"], cv2.CAP_DSHOW)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg["width"])
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg["height"])
-    cap.set(cv2.CAP_PROP_FPS, cfg["fps"])
+    cap = open_camera(cfg)
     ok, frame = cap.read()
-    if not ok:
-        raise RuntimeError(f"Cannot read from camera {cfg['camera_index']}")
     height, width = frame.shape[:2]
+    print(f"Domain video: {video.name}")
 
     hands = HandDetector(str(MODELS / "hand_landmarker.task"))
     segmenter = PersonSegmenter(str(MODELS / "selfie_segmenter.tflite"))
@@ -109,8 +142,14 @@ def main() -> None:
           f"Hotkey {cfg['hotkey']} toggles the Domain, 'q' in the preview quits.")
 
     try:
-        with pyvirtualcam.Camera(width, height, cfg["fps"], backend="obs",
-                                 fmt=pyvirtualcam.PixelFormat.BGR) as cam:
+        try:
+            cam_ctx = pyvirtualcam.Camera(width, height, cfg["fps"], backend="obs",
+                                          fmt=pyvirtualcam.PixelFormat.BGR)
+        except RuntimeError as e:
+            raise SystemExit(f"OBS Virtual Camera is not available ({e}).\n"
+                             "Install OBS Studio, open it, click 'Start Virtual Camera' once, "
+                             "then stop it and close OBS.") from None
+        with cam_ctx as cam:
             while True:
                 ok, frame = cap.read()
                 if not ok:

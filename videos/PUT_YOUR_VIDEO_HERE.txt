@@ -1,0 +1,2 @@
+Put your Domain Expansion video file (.mp4) in this folder.
+The app uses the first video it finds here.
