@@ -1,6 +1,10 @@
-import numpy as np
+import time
 
-from domain import DomainPlayer, DomainState, fit_cover, timeline_frame
+import cv2
+import numpy as np
+import pytest
+
+from domain import DomainPlayer, DomainState, PrefetchSource, fit_cover, timeline_frame
 
 
 class StubSource:
@@ -80,6 +84,88 @@ def test_loop_points_clamped_to_video():
 def test_fit_cover_crops_to_target_aspect():
     out = fit_cover(np.zeros((1080, 1920, 3), np.uint8), 640, 480)
     assert out.shape == (480, 640, 3)
+
+
+def write_test_video(path, frames=30, fps=30):
+    """Frames whose brightness encodes their index (index * 8; mp4v shifts colours by a few levels)."""
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (64, 48))
+    for i in range(frames):
+        writer.write(np.full((48, 64, 3), i * 8, np.uint8))
+    writer.release()
+    return str(path)
+
+
+def frame_index(frame):
+    return round(float(frame.mean()) / 8)
+
+
+def read_when_ready(source, index, timeout=2.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        frame = source.read(index)
+        if frame is not None and frame_index(frame) == index:
+            return frame
+        time.sleep(0.005)
+    return source.read(index)
+
+
+def test_prefetch_has_first_frames_ready(tmp_path):
+    source = PrefetchSource(write_test_video(tmp_path / "v.mp4"))
+    try:
+        assert source.fps == pytest.approx(30)
+        assert frame_index(read_when_ready(source, 0)) == 0
+        assert frame_index(read_when_ready(source, 3)) == 3
+    finally:
+        source.close()
+
+
+def test_prefetch_read_never_blocks_and_returns_earlier_frame(tmp_path):
+    source = PrefetchSource(write_test_video(tmp_path / "v.mp4"))
+    try:
+        read_when_ready(source, 2)
+        start = time.monotonic()
+        frame = source.read(25)  # far ahead of what is decoded
+        assert time.monotonic() - start < 0.05
+        assert frame is None or frame_index(frame) <= 25
+        assert frame_index(read_when_ready(source, 25)) == 25
+    finally:
+        source.close()
+
+
+def test_prefetch_follows_playback_and_loop_wrap(tmp_path):
+    source = PrefetchSource(write_test_video(tmp_path / "v.mp4"))
+    try:
+        for i in range(5, 30, 3):
+            assert frame_index(read_when_ready(source, i)) == i
+        assert frame_index(read_when_ready(source, 10)) == 10  # wrapped back to the loop start
+        assert source.decoded < 60  # forward playback decodes each frame about once
+    finally:
+        source.close()
+
+
+def test_player_starts_and_stops_source(tmp_path):
+    source = PrefetchSource(write_test_video(tmp_path / "v.mp4"))
+    clock = FakeClock()
+    try:
+        player = DomainPlayer(source, loop_start_sec=0.5, loop_end_sec=None, clock=clock)
+        player.toggle()
+        clock.t = 0.8
+        player.current_frame(64, 48)
+        assert frame_index(read_when_ready(source, 24)) == 24
+        player.toggle()  # stop rewinds so the opening is ready next time
+        assert wait_for_index(source, 0)
+    finally:
+        source.close()
+
+
+def wait_for_index(source, index, timeout=2.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        with source._lock:
+            if index in source._frames:
+                return True
+        time.sleep(0.005)
+    return False
 
 
 def make_manager(clock):

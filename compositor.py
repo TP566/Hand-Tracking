@@ -5,7 +5,7 @@ import mediapipe as mp
 import numpy as np
 from mediapipe.tasks.python import BaseOptions, vision
 
-# The selfie model runs at 256x256 internally, so segmenting a small frame loses nothing
+# The selfie model runs at 144x256 internally, so segmenting a small frame loses nothing
 # and keeps per-pixel mask work (smoothing, feathering) cheap.
 MASK_WIDTH = 320
 

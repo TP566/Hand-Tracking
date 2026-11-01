@@ -129,7 +129,28 @@ The top of the recorder window shows which sign it currently detects, so you can
 | The sign **never triggers** | Check that your hand is outlined in the preview, improve lighting, and cross the fingers more clearly. You can lower `hold_frames` in `config.json` |
 | It **triggers by accident** | Raise `hold_frames` in `config.json` (for example to `20`) |
 | The video **loops from the wrong place** | Change `loop_start_sec` in `config.json` to the second where your video's Domain is fully open |
-| Low FPS / choppy video | Set `width` to `960` and `height` to `540` in `config.json` |
+| Low FPS / choppy video | See *Performance* below |
+
+---
+
+## Performance
+
+The app runs the camera, hand detection, the person cut-out and the Domain video in parallel, so it should send a steady 30 fps on most PCs. The preview shows the current FPS and how long each part takes (`hands`, `cut-out`, `blend`, in milliseconds).
+
+If your PC can't keep up, the app lowers its own workload automatically, one step at a time, and prints what it changed:
+
+1. Checks for hand signs at half rate (a sign takes a little longer to trigger)
+2. Updates the person cut-out at half rate
+3. Blends the video at 960x540 instead of 1280x720
+
+If it is still slow:
+
+- **Plug in the charger.** Laptops slow down a lot on battery.
+- Set the Windows power mode to **Best performance** (Settings → System → Power & battery).
+- Close other apps that use the camera or a lot of CPU (games, browsers with many tabs).
+- Set `width` to `960` and `height` to `540` in `config.json`.
+
+To report performance, run the app from a terminal with `.venv\Scripts\python.exe main.py --stats`. It prints a timing line every 5 seconds that you can copy and send.
 
 ---
 
@@ -140,13 +161,16 @@ Open `config.json` with Notepad to change these. Restart the app after saving.
 | Setting | Default | What it does |
 |---|---|---|
 | `camera_index` | `0` | Which webcam to use (0 = first camera) |
-| `width`, `height` | `1280`, `720` | Camera resolution |
-| `fps` | `30` | Frames per second |
-| `hold_frames` | `12` | How long to hold a sign before it triggers (12 frames ≈ 0.4 s) |
+| `width`, `height` | `1280`, `720` | Camera and output resolution |
+| `camera_fps` | `60` | Frame rate requested from the webcam (it uses the closest one it supports) |
+| `fps` | `30` | Frames per second sent to the call. Discord shows webcams at 30 fps; set `60` only on a fast PC |
+| `quality` | `"auto"` | `"auto"` lowers the workload when the PC can't keep up (see *Performance*). `"high"` never lowers it. `"low"` always uses the lightest settings |
+| `hold_frames` | `12` | How long to hold a sign before it triggers (hands are checked 30 times a second, so 12 ≈ 0.4 s) |
 | `miss_tolerance` | `3` | How many frames the sign may briefly drop out during the hold without restarting it |
 | `cooldown_sec` | `1.5` | Wait time after a trigger before the sign works again |
 | `mirror_preview` | `true` | Mirror the preview like a selfie camera. The call always gets the normal view |
 | `show_preview` | `true` | Show the preview window |
+| `preview_width` | `640` | Width of the preview window. Smaller is cheaper; the call always gets full resolution |
 
 Each Domain has its own block under `domains` (`unlimited_void` and `malevolent_shrine`):
 
@@ -164,11 +188,13 @@ Each Domain has its own block under `domains` (`unlimited_void` and `malevolent_
 
 ### How it works
 
-1. OpenCV reads the webcam.
+Each stage runs on its own thread (`pipeline.py`): the main loop never waits on a model, it combines the newest camera frame, hands, mask and video frame. A `QualityGovernor` steps the workload down when output fps stays low.
+
+1. OpenCV reads the webcam (`CameraReader`).
 2. MediaPipe `HandLandmarker` (`hand_detector.py`) finds hand landmarks in both image pixels and 3D world coordinates. `hand_signs.py` checks them for each sign; the 3D landmarks let Unlimited Void be read even when the hand is edge-on.
 3. `gesture_trigger.py` requires the sign to be held (forgiving brief dropouts), so a single noisy frame can't trigger it.
-4. `domain.py` plays the opening once, then loops the open Domain; `DomainManager` keeps one Domain open at a time. `video_cache.py` downscales large videos once.
-5. MediaPipe `ImageSegmenter` cuts you out; `compositor.py` puts the video behind you.
+4. `domain.py` plays the opening once, then loops the open Domain; `DomainManager` keeps one Domain open at a time. `PrefetchSource` decodes the video on a background thread, each frame once, and `video_cache.py` downscales large videos once.
+5. MediaPipe `ImageSegmenter` (landscape selfie model) cuts you out; `compositor.py` puts the video behind you.
 6. `pyvirtualcam` sends the result to the OBS Virtual Camera.
 
 ### Manual setup

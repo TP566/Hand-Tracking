@@ -7,7 +7,8 @@ from mediapipe.tasks.python import BaseOptions, vision
 
 from hand_signs import Hand
 
-DETECT_WIDTH = 640
+# MediaPipe scales its input down to about 200 px anyway; a small copy saves resize/convert time.
+DETECT_WIDTH = 480
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
     (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15), (15, 16),

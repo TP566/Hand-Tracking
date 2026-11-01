@@ -2,12 +2,15 @@
   "camera_index": 0,
   "width": 1280,
   "height": 720,
+  "camera_fps": 60,
   "fps": 30,
+  "quality": "auto",
   "hold_frames": 12,
   "miss_tolerance": 3,
   "cooldown_sec": 1.5,
   "mirror_preview": true,
   "show_preview": true,
+  "preview_width": 640,
   "domains": {
     "unlimited_void": {
       "video": "",
