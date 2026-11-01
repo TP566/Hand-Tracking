@@ -22,7 +22,7 @@ FRAMES_PER_SAMPLE = 3  # the recorder saves every 3rd frame
 
 # Minimum share of a sign's frames it is detected in (the Shrine as the app runs it:
 # rule OR recordings, checked on held-out frames).
-MIN_RECALL = {"unlimited_void": 0.70, "malevolent_shrine": 0.80}
+MIN_RECALL = {"unlimited_void": 0.70, "malevolent_shrine": 0.45}
 MIN_LEARNED_RECALL = 0.60
 # Minimum share of two-hand Shrine frames it is detected in.
 MIN_SHRINE_TWO_HAND_RECALL = 0.80
@@ -91,6 +91,16 @@ def test_sign_not_triggered_by_other_recordings(label, sign):
     detect, frames = app_sign(sign)
     assert rate(detect, frames[label]) <= MAX_FALSE_RATE
     assert trigger_fires(detect, frames[label]) == 0
+
+
+def test_single_hand_never_taken_for_shrine():
+    # Regression: one raised hand used to open the Shrine through its stray one-hand frames.
+    detect, _ = app_sign("malevolent_shrine")
+    singles = [[h] for label, frames in RECORDINGS.items() for hands in frames for h in hands
+               if not (label == "malevolent_shrine" and len(hands) == 1)]
+    if not singles:
+        pytest.skip("no samples")
+    assert rate(detect, singles) <= 0.01
 
 
 @pytest.mark.skipif(not LEARNED, reason="no taught signs with enough recordings")

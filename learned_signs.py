@@ -26,10 +26,10 @@ MIN_VOTES = 5
 # typical spread is rejected as unlike anything recorded.
 RADIUS_SCALE = 1.5
 NONE_LABEL = "none"
-# Built-in signs also recognised from their recordings (rule OR recordings). The Shrine's
-# rule misses frames where the pressed hands merge; on held-out recordings the combination
-# caught 93% of Shrine frames (rule alone 49%) with no false alarms. Unlimited Void stays
-# rule-only: learned, it confused crossed with side-by-side fingers too often.
+# Built-in signs also recognised from their recordings (rule OR recordings). On held-out
+# two-hand Shrine recordings the combination caught 54% of frames (rule alone 49%) with
+# no false alarms. Unlimited Void stays rule-only: learned, it confused crossed with
+# side-by-side fingers too often.
 COMBINED_SIGNS = ("malevolent_shrine",)
 SIGN_NAME = re.compile(r"^[A-Za-z0-9_]+$")
 
@@ -106,8 +106,13 @@ class LearnedSigns:
         self.radius: dict[tuple[int, str], float] = {}
         by_count: dict[int, tuple[list, list]] = {}
         for label, frames in recordings.items():
+            # A sign is learned only with the number of hands most of its frames show. The
+            # rest are stray frames (two hands merged into one detection, or moving into the
+            # pose); a single raised hand looks like those, so they must not define the sign.
+            counts = Counter(len(hands) for hands in frames if hands)
+            keep = None if label == NONE_LABEL or not counts else counts.most_common(1)[0][0]
             for hands in frames:
-                if hands:
+                if hands and (keep is None or len(hands) == keep):
                     xs, ys = by_count.setdefault(len(hands), ([], []))
                     xs.append(frame_features(hands))
                     ys.append(label)

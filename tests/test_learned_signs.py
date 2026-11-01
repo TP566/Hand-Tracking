@@ -60,6 +60,19 @@ def test_two_hand_sign_never_matches_one_hand():
     assert model.classify([sample(make_hand(), rng)]) is None
 
 
+def test_two_hand_sign_not_learned_from_its_stray_one_hand_frames():
+    # Real Shrine recordings include frames where only one hand is seen (hands merged, or
+    # moving into the pose). A single raised hand looks like those, so it must not count.
+    rng = np.random.default_rng(8)
+    pair = lambda: [sample(make_hand(extended=ALL), rng, offset=(200.0, 400.0)),
+                    sample(make_hand(extended=ALL), rng, offset=(500.0, 400.0))]
+    stray = [[sample(make_hand(extended=ALL), rng, angle=rng.uniform(-40, 40))] for _ in range(30)]
+    model = LearnedSigns({"shrine": [pair() for _ in range(40)] + stray,
+                          "none": [[sample(make_hand(extended=()), rng)] for _ in range(40)]})
+    assert model.classify(pair()) == "shrine"
+    assert model.classify([sample(make_hand(extended=ALL), rng)]) is None
+
+
 def test_two_hand_features_include_relative_position():
     rng = np.random.default_rng(4)
     a, b = sample(make_hand(), rng, offset=(200.0, 400.0)), sample(make_hand(), rng, offset=(500.0, 400.0))
