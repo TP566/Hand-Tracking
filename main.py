@@ -12,25 +12,31 @@ import numpy as np
 import pyvirtualcam
 from pynput import keyboard
 
+import actions as pc_actions
 import setup_models
 import video_cache
 from compositor import PersonSegmenter, composite
 from domain import DomainManager, DomainPlayer, PrefetchSource
 from gesture_trigger import HoldTrigger
 from hand_detector import HandDetector, draw_hand, draw_text
-from hand_signs import GESTURES
+from learned_signs import build_gestures
 from pipeline import QUALITY_LEVELS, CameraReader, QualityGovernor, Stats, Worker
 
 ROOT = Path(__file__).parent
 MODELS = ROOT / "models"
 VIDEOS = ROOT / "videos"
+SAMPLES = ROOT / "samples"
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
-SIGN_TITLES = {"unlimited_void": "Unlimited Void", "malevolent_shrine": "Malevolent Shrine"}
 HAND_DETECT_RATE = 30  # hand detections per second at most
 
 
 def load_config() -> dict:
     return json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+
+
+def title(cfg: dict, name: str) -> str:
+    """Display name: the Domain's "title" in config, else the sign name in Title Case."""
+    return cfg["domains"].get(name, {}).get("title") or name.replace("_", " ").title()
 
 
 def find_video(name: str, domain_cfg: dict) -> Optional[Path]:
@@ -81,26 +87,37 @@ def build_domains(cfg: dict, width: int, height: int) -> DomainManager:
         players[name] = DomainPlayer(PrefetchSource(str(video)), domain_cfg["loop_start_sec"],
                                      domain_cfg.get("loop_end_sec"))
         print(f"[{name}] {video.name}  (hotkey {domain_cfg['hotkey']})")
-    if not players:
-        raise SystemExit("No Domain videos found.\nPut your videos in the 'videos' folder "
-                         "(file names containing 'gojo' or 'sukuna', for example) and run again.")
     return DomainManager(players)
 
 
-def draw_status(img: np.ndarray, lines: list[str], bars: list[tuple[str, float, bool]]) -> None:
+def sign_bars(cfg: dict, gestures: dict, domains: DomainManager,
+              actions: pc_actions.Actions) -> list[tuple[str, str]]:
+    """Preview rows: every Domain and action, with a note when something is missing."""
+    rows = []
+    for name in list(cfg["domains"]) + [n for n in actions if n not in cfg["domains"]]:
+        note = ""
+        if name in cfg["domains"] and name not in domains.players:
+            note = "no video"
+        elif name not in gestures:
+            note = f"record: teach.bat {name}"
+        rows.append((name, note))
+    return rows
+
+
+def draw_status(img: np.ndarray, lines: list[str], bars: list[tuple[str, float, str]]) -> None:
     row = 0
     for text in lines:
         draw_text(img, text, row)
         row += 1
-    for label, progress, enabled in bars:
-        y = draw_text(img, label if enabled else f"{label} (no video)", row,
-                      (255, 255, 255) if enabled else (150, 150, 150))
+    for label, progress, note in bars:
+        y = draw_text(img, f"{label} ({note})" if note else label, row,
+                      (150, 150, 150) if note else (255, 255, 255))
         if progress > 0:
             cv2.rectangle(img, (240, y - 14), (240 + int(200 * progress), y - 2), (255, 80, 200), -1)
         row += 1
 
 
-def make_hand_stage(detector: HandDetector, triggers: dict[str, HoldTrigger],
+def make_hand_stage(detector: HandDetector, gestures: dict[str, Callable], triggers: dict[str, HoldTrigger],
                     post: Callable[[str], None]) -> Callable:
     """Hand worker step: detect hands, advance the hold triggers, post fired signs."""
     last_ts = [0]
@@ -109,7 +126,7 @@ def make_hand_stage(detector: HandDetector, triggers: dict[str, HoldTrigger],
         # MediaPipe VIDEO mode requires strictly increasing timestamps.
         last_ts[0] = max(last_ts[0] + 1, int(time.monotonic() * 1000))
         hands = detector.detect(frame, last_ts[0])
-        for name, detect in GESTURES.items():
+        for name, detect in gestures.items():
             if triggers[name].update(detect(hands)):
                 post(name)
         return hands
@@ -141,10 +158,25 @@ def main() -> None:
     ok, frame = cap.read()
     height, width = frame.shape[:2]
     domains = build_domains(cfg, width, height)
+    actions = pc_actions.Actions(pc_actions.validate(cfg.get("actions", {}), cfg["domains"]))
+    if not domains.players and not list(actions):
+        raise SystemExit("No Domain videos found.\nPut your videos in the 'videos' folder "
+                         "(file names containing 'gojo' or 'sukuna', for example) and run again.")
+    gestures, messages = build_gestures(SAMPLES)
+    for message in messages:
+        print(message)
+    for name in actions:
+        status = pc_actions.describe(actions.actions[name])
+        if name not in gestures:
+            status += f" (no sign recorded yet: run teach.bat {name})"
+        print(f"[{name}] action: {status}")
+    for name in cfg["domains"]:
+        if name in domains.players and name not in gestures:
+            print(f"[{name}] No sign recorded yet: run teach.bat {name} (the hotkey works meanwhile).")
     fps = cfg["fps"]
 
     triggers = {name: HoldTrigger(cfg["hold_frames"], cfg["cooldown_sec"], cfg.get("miss_tolerance", 3))
-                for name in GESTURES}
+                for name in gestures}
     detector = HandDetector(str(MODELS / "hand_landmarker.task"))
     segmenter = PersonSegmenter(str(MODELS / "selfie_segmenter_landscape.tflite"))
 
@@ -165,7 +197,8 @@ def main() -> None:
     # Workers are capped: segmenting faster than frames are sent wastes CPU, and a fixed hand
     # detection rate keeps hold_frames meaning the same time on every PC and at any output fps.
     hand_rate = min(fps, HAND_DETECT_RATE)
-    hand_worker = Worker("hands", make_hand_stage(detector, triggers, post), camera.frames, max_rate=hand_rate)
+    hand_worker = Worker("hands", make_hand_stage(detector, gestures, triggers, post), camera.frames,
+                         max_rate=hand_rate)
     seg_reset = threading.Event()
     seg_worker = Worker("segment", make_segment_stage(segmenter, seg_reset), camera.frames,
                         max_rate=fps, paused=True)
@@ -182,6 +215,7 @@ def main() -> None:
         thread.start()
     print(f"Camera {width}x{height}. Select 'OBS Virtual Camera' in Discord. Press 'q' in the preview to quit.")
 
+    bars = sign_bars(cfg, gestures, domains, actions)
     preview_w = min(width, cfg.get("preview_width", 640))
     preview_scale = preview_w / width
     was_active = False
@@ -214,6 +248,8 @@ def main() -> None:
                     pending, sign_hits[:] = list(sign_hits), []
                 for name in pending:
                     domains.on_sign(name)
+                    if name in actions:
+                        actions.run(name)
                 active = domains.active is not None
                 if active and not was_active:
                     seg_worker.output.set(None)
@@ -264,10 +300,10 @@ def main() -> None:
                                   (255, 80, 200))
                     if cfg.get("mirror_preview", True):
                         preview = cv2.flip(preview, 1)
-                    title = SIGN_TITLES.get(domains.active, domains.active) if domains.active else "none"
-                    draw_status(preview, [f"Domain: {title} ({domains.state.value})", summary, timings],
-                                [(SIGN_TITLES.get(n, n), triggers[n].progress, n in domains.players)
-                                 for n in GESTURES])
+                    active_title = title(cfg, domains.active) if domains.active else "none"
+                    draw_status(preview, [f"Domain: {active_title} ({domains.state.value})", summary, timings],
+                                [(title(cfg, n), triggers[n].progress if n in triggers else 0.0, note)
+                                 for n, note in bars])
                     cv2.imshow("Domain Expansion (preview)", preview)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break

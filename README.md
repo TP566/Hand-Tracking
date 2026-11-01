@@ -50,8 +50,9 @@ Put your Domain videos in the **`videos`** folder. The app picks each one by its
 |---|---|---|
 | Unlimited Void | `gojo`, `void` or `unlimited` | `Gojo Satoru Domain Expansion.mp4` |
 | Malevolent Shrine | `sukuna`, `shrine` or `malevolent` | `malevolent-shrine-sukuna.mp4` |
+| Idle Death Gamble | `hakari`, `gamble` or `idle` | `hakari-idle-death-gamble.mp4` |
 
-You can use just one of them; the other sign is simply disabled. Big videos (4K, 60 fps) are shrunk once on the first run so they play smoothly. This takes a minute and is saved for next time.
+You can use just some of them; the others are simply disabled. Big videos (4K, 60 fps) are shrunk once on the first run so they play smoothly. This takes a minute and is saved for next time.
 
 ### Step 5: Start the app
 
@@ -86,8 +87,11 @@ Hold the sign for about half a second. Its pink bar in the preview fills up, and
 |---|---|
 | Unlimited Void | **Ctrl + Alt + D** |
 | Malevolent Shrine | **Ctrl + Alt + S** |
+| Idle Death Gamble | **Ctrl + Alt + H** |
 
-Only one Domain can be open at a time. While one is open, the other sign is ignored until you close it.
+Only one Domain can be open at a time. While one is open, the other signs are ignored until you close it.
+
+**Hakari: Idle Death Gamble** has no built-in sign: you teach it your own (see *Teach a new sign* below). Until then, its hotkey works. Also set `loop_start_sec` for its video in `config.json` (the second where the Domain is fully open).
 
 **To quit:** click the preview window and press **Q**, or close the black console window.
 
@@ -112,6 +116,46 @@ If a sign is hard to trigger, or triggers by accident, you can record your own h
 6. Send the `samples` folder back (commit and push it, or copy it to the main PC).
 
 The top of the recorder window shows which sign it currently detects, so you can also use it to see how well each angle works.
+
+### Teach a new sign
+
+Any sign can be taught by showing it to the app. No coding is needed.
+
+1. Double-click **`teach.bat`** and type a name for the sign, for example `mute` (letters, digits and `_` only). Or run `teach.bat mute` from a terminal.
+2. Make the sign and press **R** to record, then **R** again to stop. Record it for about 10 seconds, moving a little: front, side, tilted, nearer and farther.
+3. Press **0** and record about 10 seconds of poses that are **not** the sign, especially similar-looking ones.
+4. Press **T** to test. "Detected now" shows the sign's name while you hold it. If it misses an angle, record more of that angle; if it triggers by accident, record more **0**.
+5. Press **Q**. The next time you start `run.bat`, the sign works.
+
+### Control your PC with signs
+
+A sign can also press a shortcut, type text or open something. These are listed under `actions` in `config.json`:
+
+```json
+"actions": {
+  "mute":   {"keys": "ctrl+shift+f9"},
+  "deafen": {"keys": "ctrl+shift+f10"}
+}
+```
+
+| Action | Example | What it does |
+|---|---|---|
+| `keys` | `{"keys": "ctrl+shift+f9"}` | Presses a keyboard shortcut |
+| `type` | `{"type": "gg"}` | Types text |
+| `open` | `{"open": "https://discord.com"}` | Opens a website, app or file |
+
+**Discord mute / deafen with a sign:**
+1. In Discord: **User Settings (⚙) → Keybinds → Add a Keybind**. Set **Toggle Mute** to **Ctrl + Shift + F9**, and add another for **Toggle Deafen** set to **Ctrl + Shift + F10**. These work even when Discord isn't the active window.
+2. Teach the signs: `teach.bat mute` and `teach.bat deafen`.
+3. Start `run.bat`. Holding the mute sign now mutes or unmutes you in Discord.
+
+Actions work while a Domain is open too. A sign name can be used for a Domain or for an action, not both.
+
+### Add your own Domain
+
+1. Put the video in the `videos` folder.
+2. In `config.json`, copy one of the blocks under `domains`, give it a new name (for example `chimera_shadow_garden`), and set its `title`, `keywords` (words in the video's file name), `loop_start_sec` and `hotkey`.
+3. Teach its sign: `teach.bat chimera_shadow_garden` (the same name as the block).
 
 ---
 
@@ -172,15 +216,18 @@ Open `config.json` with Notepad to change these. Restart the app after saving.
 | `show_preview` | `true` | Show the preview window |
 | `preview_width` | `640` | Width of the preview window. Smaller is cheaper; the call always gets full resolution |
 
-Each Domain has its own block under `domains` (`unlimited_void` and `malevolent_shrine`):
+Each Domain has its own block under `domains` (`unlimited_void`, `malevolent_shrine`, `idle_death_gamble`). The block's name is also its sign's name:
 
 | Setting | Default (Void / Shrine) | What it does |
 |---|---|---|
+| `title` | from the name | Name shown in the preview (optional) |
 | `video` | `""` | Path to the video. Leave empty to find it in `videos/` by `keywords` |
 | `keywords` | see Step 4 | Words to look for in video file names |
 | `loop_start_sec` | `9.5` / `3.8` | Where the looping part starts. Everything before it plays once as the opening |
 | `loop_end_sec` | `null` | Where the loop ends (`null` = end of the video) |
 | `hotkey` | `<ctrl>+<alt>+d` / `<ctrl>+<alt>+s` | Keyboard shortcut to open or close this Domain |
+
+`actions` maps a sign name to a PC action; see *Control your PC with signs*.
 
 ---
 
@@ -191,7 +238,7 @@ Each Domain has its own block under `domains` (`unlimited_void` and `malevolent_
 Each stage runs on its own thread (`pipeline.py`): the main loop never waits on a model, it combines the newest camera frame, hands, mask and video frame. A `QualityGovernor` steps the workload down when output fps stays low.
 
 1. OpenCV reads the webcam (`CameraReader`).
-2. MediaPipe `HandLandmarker` (`hand_detector.py`) finds hand landmarks in both image pixels and 3D world coordinates. `hand_signs.py` checks them for each sign; the 3D landmarks let Unlimited Void be read even when the hand is edge-on.
+2. MediaPipe `HandLandmarker` (`hand_detector.py`) finds hand landmarks in both image pixels and 3D world coordinates. `hand_signs.py` checks the built-in signs with geometric rules (the 3D landmarks let Unlimited Void be read even when the hand is edge-on); `learned_signs.py` recognises taught signs by comparing each frame with the recordings in `samples/` (k-nearest neighbours on hand-local landmarks).
 3. `gesture_trigger.py` requires the sign to be held (forgiving brief dropouts), so a single noisy frame can't trigger it.
 4. `domain.py` plays the opening once, then loops the open Domain; `DomainManager` keeps one Domain open at a time. `PrefetchSource` decodes the video on a background thread, each frame once, and `video_cache.py` downscales large videos once.
 5. MediaPipe `ImageSegmenter` (landscape selfie model) cuts you out; `compositor.py` puts the video behind you.
@@ -209,7 +256,7 @@ python main.py
 
 ### Adding a gesture
 
-Gesture detectors live in `hand_signs.py`. Each takes the list of `Hand`s in the frame (image landmarks, world landmarks, handedness) and returns `True` when the sign is present. Add a function and register it in `GESTURES`. Each gesture gets its own `HoldTrigger` in `main.py`, which currently sends it to `DomainManager.on_sign`; that dispatch is where PyAutoGUI-based actions will go.
+The easy way is `teach.bat <name>`: `learned_signs.build_gestures` adds a detector for every label folder in `samples/` with enough recordings. For a hand-written rule, add a function to `hand_signs.py` that takes the list of `Hand`s in the frame (image landmarks, world landmarks, handedness), returns `True` when the sign is present, and register it in `GESTURES`; rules take precedence over recordings with the same name. Each gesture gets its own `HoldTrigger` in `main.py`; when it fires, the main loop sends it to `DomainManager.on_sign` and, if it has an entry in `actions`, runs it through `actions.py`.
 
 ### Tests
 
