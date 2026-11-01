@@ -112,21 +112,13 @@ def test_build_gestures_adds_learned_signs_and_skips_small_ones(tmp_path):
     assert not gestures["peace"]([sample(make_hand(extended=()), rng)])
 
 
-def test_combined_sign_uses_rule_or_recordings(tmp_path):
+def test_built_in_rule_wins_over_recordings_with_same_name(tmp_path):
     rng = np.random.default_rng(7)
     for label, frames in recordings(rng).items():
         write_recordings(tmp_path, label, frames)
-    never = lambda hands: False
-    always_marker = []
-    rule = lambda hands: bool(always_marker)
-    gestures, _ = build_gestures(tmp_path, rules={"peace": rule, "other": never}, combined=("peace",))
-    assert gestures["peace"] is not rule
-    assert gestures["peace"]([sample(make_hand(), rng)])                  # recordings catch it
-    assert not gestures["peace"]([sample(make_hand(extended=()), rng)])
-    always_marker.append(1)
-    assert gestures["peace"]([sample(make_hand(extended=()), rng)])       # the rule still counts
-    gestures, _ = build_gestures(tmp_path, rules={"peace": rule}, combined=())
-    assert gestures["peace"] is rule                                      # not combined: rule only
+    rule = lambda hands: False
+    gestures, _ = build_gestures(tmp_path, rules={"peace": rule})
+    assert gestures["peace"] is rule
 
 
 def test_build_gestures_without_samples(tmp_path):

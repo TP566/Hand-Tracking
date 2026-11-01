@@ -43,10 +43,15 @@ INDEX_LEAN_MAX = -0.01
 
 # Malevolent Shrine: both hands point up within this angle of vertical...
 SHRINE_MAX_TILT_DEG = 60.0
-# ...an index or middle fingertip of each hand meet (fraction of mean palm length)...
-SHRINE_APEX_GAP = 0.5
-# ...and the wrists are spread apart, unlike prayer hands.
+# ...an index or middle fingertip of each hand touch (fraction of mean palm length; in the
+# recorded Shrines the median gap is 0.05, while tips held slightly apart start around 0.45)...
+SHRINE_APEX_GAP = 0.35
+# ...and the wrists are spread apart, unlike prayer hands. Ring and pinky are folded or
+# interlocked, unlike two open hands touching at the fingertips.
 SHRINE_MIN_WRIST_GAP = 0.75
+# Unlimited Void is a one-hand sign: two raised hands with fingertips this close
+# (fraction of palm length) are some two-hand pose, never a Void.
+VOID_NEARBY_HAND_GAP = 1.0
 
 
 @dataclass
@@ -193,8 +198,8 @@ def _void_shape(lm: Sequence[Point]) -> bool:
 
 def is_unlimited_void(hands: Sequence[Hand]) -> bool:
     """Gojo's Unlimited Void: index up, middle crossed over it, ring and pinky curled."""
-    if _shrine_apex(hands) is not None:
-        return False  # interlocked Shrine fingers can look crossed
+    if _shrine_apex(hands, VOID_NEARBY_HAND_GAP) is not None:
+        return False  # a two-hand pose; interlocked or side-by-side fingers can look crossed
     for hand in hands:
         shape = _void_shape(hand.image) or (hand.world is not None and _void_shape(hand.world))
         if hand.world is not None:
@@ -212,8 +217,8 @@ def _pointing_up(lm: Sequence[Point]) -> bool:
     return -uy / norm >= math.cos(math.radians(SHRINE_MAX_TILT_DEG))
 
 
-def _shrine_apex(hands: Sequence[Hand]) -> Optional[tuple[float, int, int]]:
-    """(mean palm length, tip of a, tip of b) when two upright hands meet at the fingertips."""
+def _shrine_apex(hands: Sequence[Hand], max_gap: float) -> Optional[tuple[float, int, int]]:
+    """(mean palm length, tip of a, tip of b) when two upright hands' fingertips are within ``max_gap``."""
     if len(hands) != 2:
         return None
     a, b = hands[0].image, hands[1].image
@@ -222,12 +227,16 @@ def _shrine_apex(hands: Sequence[Hand]) -> Optional[tuple[float, int, int]]:
     scale = (palm_length(a) + palm_length(b)) / 2
     tips = (FINGERS["index"][3], FINGERS["middle"][3])
     gap, ta, tb = min((_dist(a[i], b[j]), i, j) for i in tips for j in tips)
-    return (scale, ta, tb) if gap < SHRINE_APEX_GAP * scale else None
+    return (scale, ta, tb) if gap < max_gap * scale else None
+
+
+def _outer_fingers_folded(lm: Sequence[Point]) -> bool:
+    return not (finger_extended(lm, "ring") and finger_extended(lm, "pinky"))
 
 
 def is_malevolent_shrine(hands: Sequence[Hand]) -> bool:
     """Sukuna's Malevolent Shrine: two upright hands meeting at the fingertips in an "A" shape."""
-    apex = _shrine_apex(hands)
+    apex = _shrine_apex(hands, SHRINE_APEX_GAP)
     if apex is None:
         return False
     scale, ta, tb = apex
@@ -235,7 +244,8 @@ def is_malevolent_shrine(hands: Sequence[Hand]) -> bool:
     apex_y = (a[ta][1] + b[tb][1]) / 2
     wrists_apart = _dist(a[WRIST], b[WRIST]) > SHRINE_MIN_WRIST_GAP * scale
     apex_above = apex_y < min(a[WRIST][1], b[WRIST][1]) - 0.5 * scale
-    return wrists_apart and apex_above
+    folded = _outer_fingers_folded(a) and _outer_fingers_folded(b)
+    return wrists_apart and apex_above and folded
 
 
 GESTURES: dict[str, Callable[[Sequence[Hand]], bool]] = {

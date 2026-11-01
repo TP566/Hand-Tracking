@@ -117,7 +117,7 @@ If a sign is hard to trigger, or triggers by accident, you can record your own h
 
 The top of the recorder window shows which sign it currently detects, so you can also use it to see how well each angle works.
 
-Malevolent Shrine is also recognised directly from these recordings, as well as by its built-in rule. Recording more of it (key **2**) makes it more reliable the next time you start the app, with no code changes.
+The most useful recordings are **0** (*not a sign*) poses that look *almost* like a sign, such as two open hands touching at the fingertips. They show exactly where a sign's rule needs to be stricter.
 
 ### Teach a new sign
 

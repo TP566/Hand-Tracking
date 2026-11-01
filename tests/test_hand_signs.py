@@ -114,9 +114,12 @@ def test_edge_on_uncrossed_not_detected(yaw):
 
 # --- Malevolent Shrine ------------------------------------------------------
 
-def shrine_pair(tilt_deg=30.0, apex_gap=2.0, flip=False):
-    """Two open hands leaning towards each other so their middle tips meet at an apex."""
-    base = make_hand(extended=("index", "middle", "ring", "pinky"))
+def shrine_pair(tilt_deg=30.0, apex_gap=2.0, flip=False, extended=("index", "middle")):
+    """Two hands leaning towards each other so their middle tips meet at an apex.
+
+    By default index and middle are up and ring and pinky folded, as in the real sign.
+    """
+    base = make_hand(extended=extended)
     apex = (320.0, 150.0)
     hands = []
     for side in (-1, 1):
@@ -155,8 +158,24 @@ def test_hands_pointing_down_not_shrine():
     assert not is_malevolent_shrine(shrine_pair(flip=True))
 
 
+def test_open_hands_touching_at_fingertips_not_shrine():
+    assert not is_malevolent_shrine(shrine_pair(extended=("index", "middle", "ring", "pinky")))
+
+
+def test_fingertips_slightly_apart_not_shrine():
+    assert not is_malevolent_shrine(shrine_pair(apex_gap=45))  # palm length is 100
+
+
 def test_shrine_is_not_unlimited_void():
     assert not is_unlimited_void(shrine_pair())
+
+
+def test_two_raised_hands_side_by_side_not_unlimited_void():
+    # Each hand alone could pass for a Void, but the Void is a one-hand sign.
+    left = transform(crossed_hand(), offset=(300.0, 400.0))
+    right = transform(crossed_hand(), mirror=True, offset=(380.0, 400.0))
+    assert is_unlimited_void(hand(left))
+    assert not is_unlimited_void([Hand(image=left), Hand(image=right)])
 
 
 def test_registry_contains_both_signs():
