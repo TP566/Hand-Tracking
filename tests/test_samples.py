@@ -15,13 +15,14 @@ import pytest
 
 from gesture_trigger import HoldTrigger
 from hand_signs import GESTURES
-from learned_signs import MIN_SAMPLES, NONE_LABEL, LearnedSigns, load_samples
+from learned_signs import COMBINED_SIGNS, MIN_SAMPLES, NONE_LABEL, LearnedSigns, load_samples
 
 SAMPLES = Path(__file__).resolve().parent.parent / "samples"
 FRAMES_PER_SAMPLE = 3  # the recorder saves every 3rd frame
 
-# Minimum share of a sign's frames it is detected in.
-MIN_RECALL = {"unlimited_void": 0.70, "malevolent_shrine": 0.40}
+# Minimum share of a sign's frames it is detected in (the Shrine as the app runs it:
+# rule OR recordings, checked on held-out frames).
+MIN_RECALL = {"unlimited_void": 0.70, "malevolent_shrine": 0.80}
 MIN_LEARNED_RECALL = 0.60
 # Minimum share of two-hand Shrine frames it is detected in.
 MIN_SHRINE_TWO_HAND_RECALL = 0.80
@@ -37,6 +38,18 @@ LEARNED = sorted(label for label, frames in RECORDINGS.items()
                  if label not in GESTURES and label != NONE_LABEL and len(frames) >= 2 * MIN_SAMPLES)
 TRAIN = {label: frames[:len(frames) // 2] for label, frames in RECORDINGS.items()}
 TEST = {label: frames[len(frames) // 2:] for label, frames in RECORDINGS.items()}
+MODEL = LearnedSigns(TRAIN)
+
+
+def app_sign(sign):
+    """(detector, frames to check it on): built-in signs as the app runs them.
+
+    Signs combined with their recordings are learned from TRAIN and checked on TEST.
+    """
+    if sign in COMBINED_SIGNS and len(RECORDINGS[sign]) >= 2 * MIN_SAMPLES:
+        learned = MODEL.detector(sign)
+        return (lambda hands: GESTURES[sign](hands) or learned(hands)), TEST
+    return GESTURES[sign], RECORDINGS
 
 
 def rate(detect, frames):
@@ -59,11 +72,12 @@ def trigger_fires(detect, frames):
 def test_sign_detected_in_its_recordings(sign):
     if not RECORDINGS[sign]:
         pytest.skip(f"no {sign} samples")
-    assert rate(GESTURES[sign], RECORDINGS[sign]) >= MIN_RECALL[sign]
-    assert trigger_fires(GESTURES[sign], RECORDINGS[sign]) >= 1
+    detect, frames = app_sign(sign)
+    assert rate(detect, frames[sign]) >= MIN_RECALL[sign]
+    assert trigger_fires(detect, frames[sign]) >= 1
 
 
-def test_shrine_detected_when_both_hands_seen():
+def test_shrine_rule_detected_when_both_hands_seen():
     two_hand = [h for h in RECORDINGS["malevolent_shrine"] if len(h) == 2]
     if not two_hand:
         pytest.skip("no two-hand Shrine samples")
@@ -74,28 +88,24 @@ def test_shrine_detected_when_both_hands_seen():
 def test_sign_not_triggered_by_other_recordings(label, sign):
     if not RECORDINGS[label]:
         pytest.skip(f"no {label} samples")
-    assert rate(GESTURES[sign], RECORDINGS[label]) <= MAX_FALSE_RATE
-    assert trigger_fires(GESTURES[sign], RECORDINGS[label]) == 0
-
-
-@pytest.fixture(scope="module")
-def learned_model():
-    return LearnedSigns(TRAIN)
+    detect, frames = app_sign(sign)
+    assert rate(detect, frames[label]) <= MAX_FALSE_RATE
+    assert trigger_fires(detect, frames[label]) == 0
 
 
 @pytest.mark.skipif(not LEARNED, reason="no taught signs with enough recordings")
 @pytest.mark.parametrize("sign", LEARNED)
-def test_learned_sign_detected_in_new_frames(learned_model, sign):
-    detect = learned_model.detector(sign)
+def test_learned_sign_detected_in_new_frames(sign):
+    detect = MODEL.detector(sign)
     assert rate(detect, TEST[sign]) >= MIN_LEARNED_RECALL
     assert trigger_fires(detect, TEST[sign]) >= 1
 
 
 @pytest.mark.skipif(not LEARNED, reason="no taught signs with enough recordings")
 @pytest.mark.parametrize("label,sign", [(label, sign) for label in RECORDINGS for sign in LEARNED if sign != label])
-def test_learned_sign_not_triggered_by_other_recordings(learned_model, label, sign):
+def test_learned_sign_not_triggered_by_other_recordings(label, sign):
     if not TEST[label]:
         pytest.skip(f"no {label} samples")
-    detect = learned_model.detector(sign)
+    detect = MODEL.detector(sign)
     assert rate(detect, TEST[label]) <= MAX_FALSE_RATE
     assert trigger_fires(detect, TEST[label]) == 0

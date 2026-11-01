@@ -26,6 +26,11 @@ MIN_VOTES = 5
 # typical spread is rejected as unlike anything recorded.
 RADIUS_SCALE = 1.5
 NONE_LABEL = "none"
+# Built-in signs also recognised from their recordings (rule OR recordings). The Shrine's
+# rule misses frames where the pressed hands merge; on held-out recordings the combination
+# caught 93% of Shrine frames (rule alone 49%) with no false alarms. Unlimited Void stays
+# rule-only: learned, it confused crossed with side-by-side fingers too often.
+COMBINED_SIGNS = ("malevolent_shrine",)
 SIGN_NAME = re.compile(r"^[A-Za-z0-9_]+$")
 
 INDEX_MCP, MIDDLE_MCP, PINKY_MCP = FINGERS["index"][0], FINGERS["middle"][0], FINGERS["pinky"][0]
@@ -142,9 +147,15 @@ class LearnedSigns:
         return lambda hands: self.classify(hands) == label
 
 
-def build_gestures(samples_dir: Path, rules: Optional[dict] = None) -> tuple[dict[str, Callable], list[str]]:
+def _either(rule: Callable, learned: Callable) -> Callable[[Sequence[Hand]], bool]:
+    return lambda hands: rule(hands) or learned(hands)
+
+
+def build_gestures(samples_dir: Path, rules: Optional[dict] = None,
+                   combined: Sequence[str] = COMBINED_SIGNS) -> tuple[dict[str, Callable], list[str]]:
     """Rule-based signs plus a learned detector for every other recorded sign.
 
+    Signs in ``combined`` keep their rule and are also recognised from their recordings.
     Returns the detectors and messages about signs that need more recordings.
     """
     rules = GESTURES if rules is None else rules
@@ -153,15 +164,17 @@ def build_gestures(samples_dir: Path, rules: Optional[dict] = None) -> tuple[dic
     recordings = load_samples(samples_dir)
     learned = []
     for label, frames in recordings.items():
-        if label in rules or label == NONE_LABEL or not SIGN_NAME.match(label):
+        if label == NONE_LABEL or not SIGN_NAME.match(label) or (label in rules and label not in combined):
             continue
         if len(frames) < MIN_SAMPLES:
-            messages.append(f"[{label}] {len(frames)} recorded frames; record at least "
-                            f"{MIN_SAMPLES - len(frames)} more with teach.bat {label} to use this sign.")
+            if label not in rules:
+                messages.append(f"[{label}] {len(frames)} recorded frames; record at least "
+                                f"{MIN_SAMPLES - len(frames)} more with teach.bat {label} to use this sign.")
             continue
         learned.append(label)
     if learned:
         model = LearnedSigns(recordings)
         for label in learned:
-            gestures[label] = model.detector(label)
+            detector = model.detector(label)
+            gestures[label] = _either(rules[label], detector) if label in rules else detector
     return gestures, messages
