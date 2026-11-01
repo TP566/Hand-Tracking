@@ -15,7 +15,8 @@ HOOKED = [(0, -40), (0, -55), (0, -50)]  # bent at the last joints, tip still we
 def make_hand(extended=("index", "middle"), tip_x=None, hooked=()):
     """Build 21 landmarks; ``tip_x`` overrides a finger's DIP/TIP x position."""
     tip_x = tip_x or {}
-    lm = [(0.0, 0.0)] + [(-40.0, -30.0 - 15 * i) for i in range(4)]  # wrist + thumb
+    # Wrist sits under the middle knuckle, as on a real hand.
+    lm = [(KNUCKLE_X["middle"], 0.0)] + [(-40.0, -30.0 - 15 * i) for i in range(4)]  # wrist + thumb
     for finger in ("index", "middle", "ring", "pinky"):
         mx, my = KNUCKLE_X[finger], -100.0
         lm.append((mx, my))

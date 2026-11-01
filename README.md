@@ -191,4 +191,4 @@ Gesture detectors live in `hand_signs.py`. Each takes the list of `Hand`s in the
 pytest
 ```
 
-`tests/test_samples.py` checks every recording in `samples/` (made with `record.bat`) against the detectors, so tuning the thresholds in `hand_signs.py` can be verified against real hands.
+`tests/test_samples.py` replays the recordings in `samples/` (made with `record.bat`) through the detectors and the hold trigger. It checks that each sign is detected often enough to fire in its own recordings and never fires in the others, so tuning the thresholds in `hand_signs.py` can be verified against real hands.

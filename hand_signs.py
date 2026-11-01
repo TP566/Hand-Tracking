@@ -32,12 +32,21 @@ CROSS_MAX_TIP_GAP = 0.45
 CROSS_MIN_SWAP = 0.03
 CROSS_MIN_SWAP_3D = 0.03
 
+# On real hands MediaPipe rarely places crossed tips fully swapped. Tuned on the
+# recorded samples: the index tip lines up with (or passes) the middle tip in the
+# image, and in 3D the index leans in towards the middle finger.
+# Max lead of the index tip over the middle tip across the palm (fraction of palm length).
+CROSS_TIP_LEAD_MAX = 0.03
+# The index DIP must sit at least this far in from the index knuckle, towards the
+# middle finger (fraction of palm length; negative = leaning in).
+INDEX_LEAN_MAX = -0.01
+
 # Malevolent Shrine: both hands point up within this angle of vertical...
 SHRINE_MAX_TILT_DEG = 60.0
 # ...an index or middle fingertip of each hand meet (fraction of mean palm length)...
 SHRINE_APEX_GAP = 0.5
 # ...and the wrists are spread apart, unlike prayer hands.
-SHRINE_MIN_WRIST_GAP = 0.9
+SHRINE_MIN_WRIST_GAP = 0.75
 
 
 @dataclass
@@ -154,6 +163,28 @@ def fingers_crossed_3d(world: Sequence[Point], a: str = "index", b: str = "middl
     return swapped and tips_close(world, a, b, CROSS_MAX_TIP_GAP * scale)
 
 
+def index_side_offset(lm: Sequence[Point], idx: int) -> float:
+    """``side_offset`` as a fraction of palm length, positive towards the index side.
+
+    Oriented by the index and pinky knuckles, which stay further apart than the
+    index and middle ones when the hand turns sideways.
+    """
+    sign = 1.0 if side_offset(lm, FINGERS["index"][0]) >= side_offset(lm, FINGERS["pinky"][0]) else -1.0
+    return sign * side_offset(lm, idx) / palm_length(lm)
+
+
+def tips_aligned(lm: Sequence[Point]) -> bool:
+    """2D: the index tip does not lead the middle tip towards the index side, and they touch."""
+    lead = index_side_offset(lm, FINGERS["index"][3]) - index_side_offset(lm, FINGERS["middle"][3])
+    return lead < CROSS_TIP_LEAD_MAX and tips_close(lm, "index", "middle", CROSS_MAX_TIP_GAP * palm_length(lm))
+
+
+def index_leans_in(world: Sequence[Point]) -> bool:
+    """3D: the index finger is pushed across towards the middle finger."""
+    mcp, _, dip, _ = FINGERS["index"]
+    return _dot(_sub(world[dip], world[mcp]), palm_across_axis(world)) / palm_length(world) < INDEX_LEAN_MAX
+
+
 def _void_shape(lm: Sequence[Point]) -> bool:
     # The middle finger only has to be raised: from the side it hooks over the index.
     return (finger_extended(lm, "index") and finger_raised(lm, "middle")
@@ -162,9 +193,14 @@ def _void_shape(lm: Sequence[Point]) -> bool:
 
 def is_unlimited_void(hands: Sequence[Hand]) -> bool:
     """Gojo's Unlimited Void: index up, middle crossed over it, ring and pinky curled."""
+    if _shrine_apex(hands) is not None:
+        return False  # interlocked Shrine fingers can look crossed
     for hand in hands:
         shape = _void_shape(hand.image) or (hand.world is not None and _void_shape(hand.world))
-        crossed = fingers_crossed(hand.image) or (hand.world is not None and fingers_crossed_3d(hand.world))
+        if hand.world is not None:
+            crossed = tips_aligned(hand.image) and index_leans_in(hand.world)
+        else:
+            crossed = fingers_crossed(hand.image)
         if shape and crossed:
             return True
     return False
@@ -176,20 +212,30 @@ def _pointing_up(lm: Sequence[Point]) -> bool:
     return -uy / norm >= math.cos(math.radians(SHRINE_MAX_TILT_DEG))
 
 
-def is_malevolent_shrine(hands: Sequence[Hand]) -> bool:
-    """Sukuna's Malevolent Shrine: two upright hands meeting at the fingertips in an "A" shape."""
+def _shrine_apex(hands: Sequence[Hand]) -> Optional[tuple[float, int, int]]:
+    """(mean palm length, tip of a, tip of b) when two upright hands meet at the fingertips."""
     if len(hands) != 2:
-        return False
+        return None
     a, b = hands[0].image, hands[1].image
     if not (_pointing_up(a) and _pointing_up(b)):
-        return False
+        return None
     scale = (palm_length(a) + palm_length(b)) / 2
     tips = (FINGERS["index"][3], FINGERS["middle"][3])
     gap, ta, tb = min((_dist(a[i], b[j]), i, j) for i in tips for j in tips)
+    return (scale, ta, tb) if gap < SHRINE_APEX_GAP * scale else None
+
+
+def is_malevolent_shrine(hands: Sequence[Hand]) -> bool:
+    """Sukuna's Malevolent Shrine: two upright hands meeting at the fingertips in an "A" shape."""
+    apex = _shrine_apex(hands)
+    if apex is None:
+        return False
+    scale, ta, tb = apex
+    a, b = hands[0].image, hands[1].image
     apex_y = (a[ta][1] + b[tb][1]) / 2
     wrists_apart = _dist(a[WRIST], b[WRIST]) > SHRINE_MIN_WRIST_GAP * scale
     apex_above = apex_y < min(a[WRIST][1], b[WRIST][1]) - 0.5 * scale
-    return gap < SHRINE_APEX_GAP * scale and wrists_apart and apex_above
+    return wrists_apart and apex_above
 
 
 GESTURES: dict[str, Callable[[Sequence[Hand]], bool]] = {
