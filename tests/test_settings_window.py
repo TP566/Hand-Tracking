@@ -98,6 +98,32 @@ def test_edit_and_save_writes_config(window, cfg_path):
     assert window.status.get() == "Saved. Live settings applied."
 
 
+def test_missing_keys_are_saved_with_int_defaults(tmp_path, samples, dialogs):
+    path = tmp_path / "config.json"
+    cfg = on_disk(REPO_CONFIG)
+    del cfg["preview_width"], cfg["camera_fps"]
+    path.write_text(json.dumps(cfg), encoding="utf-8")
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        win = SettingsWindow(root, path, samples)
+        win.fields["hold_frames"].set("13")
+        assert win.save()
+    finally:
+        root.destroy()
+    saved = on_disk(path)
+    assert saved["preview_width"] == 640 and type(saved["preview_width"]) is int
+    assert saved["camera_fps"] == cfg["fps"] and type(saved["camera_fps"]) is int
+
+
+def test_fractional_preview_width_is_refused(window, cfg_path):
+    before = cfg_path.read_bytes()
+    window.fields["preview_width"].set("800.5")
+    assert not window.save()
+    assert window.errors["preview_width"] == "Must be a whole number."
+    assert cfg_path.read_bytes() == before
+
+
 def test_restart_only_change_is_reported(window, cfg_path):
     window.fields["camera_index"].set("1")
     window.domains["idle_death_gamble"]["hotkey"].set("<ctrl>+<alt>+g")

@@ -86,6 +86,15 @@ def test_validate_rejects_non_integer_and_out_of_range_numbers():
     assert "miss_tolerance" not in errors
 
 
+def test_validate_rejects_fractional_preview_width_and_camera_fps():
+    cfg = valid_cfg()
+    cfg["preview_width"] = 800.5
+    cfg["camera_fps"] = 29.97
+    errors = validate(cfg)
+    assert errors["preview_width"] == "Must be a whole number."
+    assert errors["camera_fps"] == "Must be a whole number."
+
+
 def test_validate_requires_booleans_for_preview_flags():
     cfg = valid_cfg()
     cfg["show_preview"] = "yes"

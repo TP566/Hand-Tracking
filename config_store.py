@@ -29,7 +29,8 @@ RANGES: dict[str, tuple[float, float]] = {
     "cooldown_sec": (0, 10),
     "preview_width": (160, 1920),
 }
-INTEGER_KEYS = ("hold_frames", "miss_tolerance", "camera_index", "width", "height", "fps")
+INTEGER_KEYS = ("hold_frames", "miss_tolerance", "camera_index", "width", "height", "fps",
+                "camera_fps", "preview_width")
 # Settings the running app can pick up without a restart.
 LIVE_KEYS = ("hold_frames", "miss_tolerance", "cooldown_sec", "quality",
              "show_preview", "preview_width", "mirror_preview", "actions")

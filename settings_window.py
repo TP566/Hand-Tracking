@@ -174,13 +174,18 @@ class SettingsWindow:
         label.grid_remove()
         self._errors_below.append((label, var))
 
+    def _loaded_or_default(self, key: str):
+        """The value from config.json, or what main.py assumes when the key is missing."""
+        if key in self.cfg:
+            return self.cfg[key]
+        return {**DEFAULTS, "camera_fps": self.cfg.get("fps", "")}.get(key, "")
+
     def _section(self, tab: ttk.Frame, header: str, specs) -> ttk.LabelFrame:
         box = ttk.LabelFrame(tab, text=header, padding=8)
         box.pack(fill="x", pady=(0, 8))
-        defaults = {**DEFAULTS, "camera_fps": self.cfg.get("fps", "")}
         for row, (key, label) in enumerate(specs):
             ttk.Label(box, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
-            value = self.cfg[key] if key in self.cfg else defaults.get(key, "")
+            value = self._loaded_or_default(key)
             if key in BOOL_KEYS:
                 var = tk.BooleanVar(self.root, value=bool(value))
                 widget = ttk.Checkbutton(box, variable=var)
@@ -330,7 +335,8 @@ class SettingsWindow:
             elif key == "quality":
                 cfg[key] = var.get()
             else:
-                integer = key in config_store.INTEGER_KEYS or type(self.cfg.get(key)) is int
+                integer = (key in config_store.INTEGER_KEYS
+                           or type(self._loaded_or_default(key)) is int)
                 cfg[key] = to_number(var.get(), integer)
         cfg["domains"] = {name: self._collect_domain(name, vars_)
                           for name, vars_ in self.domains.items()}
