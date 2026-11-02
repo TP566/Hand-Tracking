@@ -45,9 +45,13 @@ START_GRACE_SEC = 15     # the app takes a while to load before it holds the loc
 
 
 def launch_settings() -> None:
-    """Open the settings window in its own process and return at once."""
-    subprocess.Popen([sys.executable, str(Path(__file__).resolve())], cwd=ROOT,
-                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    """Open the settings window in its own process and return at once.
+
+    It runs detached under pythonw.exe, so closing the app's console leaves it open.
+    """
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    subprocess.Popen([str(pythonw) if pythonw.exists() else sys.executable, str(Path(__file__).resolve())],
+                     cwd=ROOT, creationflags=subprocess.DETACHED_PROCESS)
 
 
 def to_number(text: str, integer: bool):

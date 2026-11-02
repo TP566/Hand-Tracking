@@ -19,8 +19,12 @@ from compositor import PersonSegmenter, composite
 from domain import DomainManager, DomainPlayer, PrefetchSource
 from gesture_trigger import HoldTrigger
 from hand_detector import HandDetector, draw_hand, draw_text
+from instance import LOCK_PATH, AppLock, hold_app_lock
 from learned_signs import build_gestures
+from live_config import ConfigWatcher, apply_live
 from pipeline import QUALITY_LEVELS, CameraReader, QualityGovernor, Stats, Worker
+from settings_window import launch_settings
+from tray import start_tray
 
 ROOT = Path(__file__).parent
 MODELS = ROOT / "models"
@@ -28,6 +32,8 @@ VIDEOS = ROOT / "videos"
 SAMPLES = ROOT / "samples"
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
 HAND_DETECT_RATE = 30  # hand detections per second at most
+PREVIEW_WINDOW = "Domain Expansion (preview)"
+QUIT = "__quit__"  # posted by the tray's Quit, handled by the main loop
 
 
 def load_config() -> dict:
@@ -150,9 +156,29 @@ def even(x: float) -> int:
     return max(2, int(x) // 2 * 2)
 
 
+def take_app_lock(attempts: int = 3, delay_sec: float = 0.2) -> AppLock:
+    """The single-instance lock; retried briefly because the settings window probes it too."""
+    for attempt in range(attempts):
+        try:
+            return hold_app_lock(LOCK_PATH)
+        except OSError:
+            if attempt < attempts - 1:
+                time.sleep(delay_sec)
+    raise SystemExit("The app is already running (check the tray icon). "
+                     "Close it first, or use its Settings menu.")
+
+
 def main() -> None:
     show_stats = "--stats" in sys.argv
     cfg = load_config()
+    app_lock = take_app_lock()
+    try:
+        run(cfg, show_stats)
+    finally:
+        app_lock.release()
+
+
+def run(cfg: dict, show_stats: bool) -> None:
     ensure_models()
     cap = open_camera(cfg)
     ok, frame = cap.read()
@@ -192,6 +218,7 @@ def main() -> None:
     hotkeys = keyboard.GlobalHotKeys({d["hotkey"]: (lambda n=name: post(n))
                                       for name, d in cfg["domains"].items()})
     hotkeys.start()
+    tray = start_tray(on_settings=launch_settings, on_quit=lambda: post(QUIT))
 
     camera = CameraReader(cap)
     # Workers are capped: segmenting faster than frames are sent wastes CPU, and a fixed hand
@@ -213,11 +240,14 @@ def main() -> None:
     blend_size = apply_quality(governor.level)
     for thread in (camera, hand_worker, seg_worker):
         thread.start()
-    print(f"Camera {width}x{height}. Select 'OBS Virtual Camera' in Discord. Press 'q' in the preview to quit.")
+    print(f"Camera {width}x{height}. Select 'OBS Virtual Camera' in Discord. "
+          "Press 'q' in the preview, or use Quit in the tray icon, to quit.")
 
     bars = sign_bars(cfg, gestures, domains, actions)
     preview_w = min(width, cfg.get("preview_width", 640))
     preview_scale = preview_w / width
+    preview_open = False
+    watcher = ConfigWatcher(ROOT / "config.json")
     was_active = False
     seen = 0
     next_report = time.monotonic() + 5
@@ -246,6 +276,34 @@ def main() -> None:
 
                 with lock:
                     pending, sign_hits[:] = list(sign_hits), []
+                if QUIT in pending:
+                    break
+                new_cfg = watcher.poll()
+                if new_cfg is not None:
+                    result = apply_live(cfg, new_cfg, triggers, governor, actions)
+                    # Only what took effect goes into cfg: restart-only keys keep showing what runs,
+                    # and actions that failed to apply stay as they are so a later edit retries.
+                    for key in result.applied:
+                        if key in new_cfg:
+                            cfg[key] = new_cfg[key]
+                        else:
+                            cfg.pop(key, None)
+                    cfg.update(result.preview)
+                    preview_w = min(width, cfg["preview_width"])
+                    preview_scale = preview_w / width
+                    if preview_open and not cfg["show_preview"]:
+                        cv2.destroyWindow(PREVIEW_WINDOW)
+                        cv2.waitKey(1)
+                        preview_open = False
+                    if result.quality_changed:
+                        blend_size = apply_quality(governor.level)
+                    bars = sign_bars(cfg, gestures, domains, actions)
+                    if result.applied:
+                        print(f"Settings applied live: {', '.join(result.applied)}")
+                    for warning in result.warnings:
+                        print(warning)
+                    if result.restart:
+                        print(f"Saved; restart the app to apply: {', '.join(result.restart)}")
                 for name in pending:
                     domains.on_sign(name)
                     if name in actions:
@@ -304,12 +362,14 @@ def main() -> None:
                     draw_status(preview, [f"Domain: {active_title} ({domains.state.value})", summary, timings],
                                 [(title(cfg, n), triggers[n].progress if n in triggers else 0.0, note)
                                  for n, note in bars])
-                    cv2.imshow("Domain Expansion (preview)", preview)
+                    cv2.imshow(PREVIEW_WINDOW, preview)
+                    preview_open = True
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
                 cam.sleep_until_next_frame()
     finally:
         hotkeys.stop()
+        tray.stop()
         for thread in (camera, hand_worker, seg_worker):
             thread.stop()
             thread.join(timeout=2.0)

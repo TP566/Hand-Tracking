@@ -314,11 +314,26 @@ def test_video_path_relative_inside_project(tmp_path):
     assert settings_window.video_value(str(outside)) == str(outside)
 
 
-def test_launch_settings_starts_own_process(monkeypatch):
+def _launch(monkeypatch, tmp_path, with_pythonw: bool):
+    (tmp_path / "python.exe").touch()
+    if with_pythonw:
+        (tmp_path / "pythonw.exe").touch()
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "python.exe"))
     calls = []
     monkeypatch.setattr(settings_window.subprocess, "Popen",
                         lambda args, **kw: calls.append((args, kw)))
     launch_settings()
-    args, kw = calls[0]
-    assert args == [sys.executable, str(Path(settings_window.__file__).resolve())]
-    assert kw["creationflags"] == subprocess.CREATE_NEW_PROCESS_GROUP
+    assert len(calls) == 1
+    return calls[0]
+
+
+def test_launch_settings_starts_detached_pythonw(monkeypatch, tmp_path):
+    args, kw = _launch(monkeypatch, tmp_path, with_pythonw=True)
+    assert args == [str(tmp_path / "pythonw.exe"), str(Path(settings_window.__file__).resolve())]
+    assert kw["creationflags"] == subprocess.DETACHED_PROCESS
+
+
+def test_launch_settings_falls_back_to_python_without_pythonw(monkeypatch, tmp_path):
+    args, kw = _launch(monkeypatch, tmp_path, with_pythonw=False)
+    assert args == [str(tmp_path / "python.exe"), str(Path(settings_window.__file__).resolve())]
+    assert kw["creationflags"] == subprocess.DETACHED_PROCESS
