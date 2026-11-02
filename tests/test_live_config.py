@@ -11,11 +11,12 @@ from gesture_trigger import HoldTrigger
 from live_config import ConfigWatcher, LiveResult, apply_live
 from pipeline import QUALITY_LEVELS, QualityGovernor
 
-REPO_CONFIG = Path(__file__).resolve().parent.parent / "config.json"
+# A frozen copy: the real config.json is the user's, and changes as they use the settings window.
+FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config.json"
 
 
 def base_cfg() -> dict:
-    return copy.deepcopy(json.loads(REPO_CONFIG.read_text(encoding="utf-8")))
+    return copy.deepcopy(json.loads(FIXTURE_CONFIG.read_text(encoding="utf-8")))
 
 
 @pytest.fixture
@@ -128,6 +129,17 @@ def test_clash_uses_the_new_domains(old, triggers, gov, acts):
     assert "wave" in r.warnings[0] and "mute" in acts and r.restart == ["domains"]
 
 
+def test_clash_also_uses_the_running_domains(old, triggers, gov, acts):
+    new = copy.deepcopy(old)
+    del new["domains"]["idle_death_gamble"]     # still running until restart
+    new["actions"] = {**old["actions"], "idle_death_gamble": {"keys": "a"}}
+    r = apply_live(old, new, triggers, gov, acts)
+    assert "actions" not in r.applied
+    assert len(r.warnings) == 1 and "idle_death_gamble" in r.warnings[0]
+    assert "idle_death_gamble" not in acts and acts.actions == old["actions"]
+    assert r.restart == ["domains"]
+
+
 def test_restart_only_changes_reported_not_applied(old, triggers, gov, acts):
     new = copy.deepcopy(old)
     new.update(fps=60, camera_index=1)
@@ -180,6 +192,18 @@ def test_watcher_returns_config_once_per_change(tmp_path):
     assert watcher.poll() == cfg                        # after an edit
     clock.now += 2
     assert watcher.poll() is None                       # same file again
+
+
+def test_watcher_accepts_a_file_saved_with_a_bom(tmp_path, capsys):
+    p, clock, watcher = make_watcher(tmp_path)
+    cfg = base_cfg()
+    cfg["hold_frames"] = 20
+    p.write_text(json.dumps(cfg), encoding="utf-8-sig")
+    st = p.stat()
+    os.utime(p, (st.st_atime, st.st_mtime + 5))
+    clock.now += 2
+    assert watcher.poll() == cfg
+    assert capsys.readouterr().out == ""
 
 
 def test_watcher_only_stats_after_the_interval(tmp_path, monkeypatch):

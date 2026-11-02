@@ -505,8 +505,9 @@ class SettingsWindow:
             answer = messagebox.askyesnocancel("Unsaved changes", "Save your changes before starting the app?")
             if answer is None or (answer and not self.save()):
                 return
-        # python.exe even when this window runs under pythonw.exe, so the app gets its own console.
-        subprocess.Popen([interpreter("python.exe"), str(ROOT / "main.py")], cwd=ROOT,
+        # Through run.bat in a new console: the app gets one even when this window runs under
+        # pythonw.exe, and run.bat's pause keeps it open to show why the app could not start.
+        subprocess.Popen(["cmd.exe", "/c", str(ROOT / "run.bat")], cwd=ROOT,
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
         self._start_grace = time.monotonic() + START_GRACE_SEC
         self.refresh_start()
@@ -546,6 +547,11 @@ class SettingsWindow:
         self.root.destroy()
 
 
+def report_error(kind: type, value: BaseException, tb) -> None:
+    """Show an unexpected error in a message box: under pythonw.exe there is no console to print to."""
+    messagebox.showerror("Settings", f"Something went wrong: {kind.__name__}: {value}")
+
+
 def main() -> None:
     try:
         import ctypes
@@ -553,11 +559,16 @@ def main() -> None:
     except (AttributeError, OSError):
         pass
     root = tk.Tk()
+    root.report_callback_exception = report_error     # errors in buttons and timers
     try:
         SettingsWindow(root, ROOT / "config.json", ROOT / "samples")
     except (OSError, ValueError) as exc:
         root.withdraw()
         messagebox.showerror("Settings", f"Could not read config.json: {exc}")
+        return
+    except Exception as exc:
+        root.withdraw()
+        report_error(type(exc), exc, exc.__traceback__)
         return
     root.mainloop()
 

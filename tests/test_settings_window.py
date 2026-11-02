@@ -17,8 +17,8 @@ except tk.TclError:
 import settings_window
 from settings_window import SettingsWindow, launch_settings
 
-REPO = Path(__file__).resolve().parent.parent
-REPO_CONFIG = REPO / "config.json"
+# A frozen copy: the real config.json is the user's, and changes as they use this window.
+REPO_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config.json"
 
 
 @pytest.fixture
@@ -307,8 +307,7 @@ def test_start_button_follows_app_lock(window, monkeypatch):
     assert str(window.start_button.cget("state")) == "normal"
 
 
-def test_start_app_uses_console_python_under_pythonw(window, monkeypatch, tmp_path):
-    (tmp_path / "python.exe").touch()
+def test_start_app_runs_run_bat_in_its_own_console(window, monkeypatch, tmp_path):
     (tmp_path / "pythonw.exe").touch()
     monkeypatch.setattr(sys, "executable", str(tmp_path / "pythonw.exe"))
     monkeypatch.setattr(settings_window, "app_running", lambda path: False)
@@ -318,8 +317,49 @@ def test_start_app_uses_console_python_under_pythonw(window, monkeypatch, tmp_pa
     window.start_app()
     assert len(calls) == 1
     args, kw = calls[0]
-    assert args == [str(tmp_path / "python.exe"), str(settings_window.ROOT / "main.py")]
+    # run.bat ends with pause, so a startup error stays readable in that console.
+    assert args == ["cmd.exe", "/c", str(settings_window.ROOT / "run.bat")]
+    assert kw["cwd"] == settings_window.ROOT
     assert kw["creationflags"] == subprocess.CREATE_NEW_CONSOLE
+    assert "pause" in (settings_window.ROOT / "run.bat").read_text().lower()
+
+
+def _run_main(monkeypatch, make_window) -> list[tk.Tk]:
+    """Run settings_window.main() with ``make_window`` in place of SettingsWindow; returns its roots."""
+    roots = []
+
+    def fake_window(root, *args):
+        roots.append(root)
+        make_window(root)
+
+    monkeypatch.setattr(settings_window, "SettingsWindow", fake_window)
+    monkeypatch.setattr(tk.Tk, "mainloop", lambda self, n=0: None)
+    import ctypes
+    monkeypatch.setattr(ctypes.windll.shcore, "SetProcessDpiAwareness", lambda value: None)
+    try:
+        settings_window.main()
+    finally:
+        for root in roots:
+            root.destroy()
+    return roots
+
+
+def test_errors_in_callbacks_are_shown_in_a_message_box(monkeypatch, dialogs):
+    def failing_button(root):
+        def start():
+            raise OSError("cannot start run.bat")
+        tk.Button(root, command=start).invoke()     # the error goes through Tk's callback hook
+
+    _run_main(monkeypatch, failing_button)
+    assert dialogs.calls == [("showerror", "Something went wrong: OSError: cannot start run.bat")]
+
+
+def test_unexpected_startup_error_is_shown_in_a_message_box(monkeypatch, dialogs):
+    def broken(root):
+        raise KeyError("domains")
+
+    _run_main(monkeypatch, broken)
+    assert dialogs.calls == [("showerror", "Something went wrong: KeyError: 'domains'")]
 
 
 def test_video_path_relative_inside_project(tmp_path):

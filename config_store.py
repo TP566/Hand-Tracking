@@ -12,7 +12,7 @@ import os
 import shutil
 from pathlib import Path
 
-from pynput.keyboard import HotKey
+from pynput.keyboard import HotKey, Key
 
 from actions import ACTION_TYPES
 from hand_signs import GESTURES
@@ -37,6 +37,10 @@ LIVE_KEYS = ("hold_frames", "miss_tolerance", "cooldown_sec", "quality",
 QUALITIES = ("auto", "high", "low")
 # main.py reads these without a default, so a config without them cannot start.
 REQUIRED_KEYS = ("camera_index", "width", "height", "fps", "hold_frames", "cooldown_sec")
+# HotKey.parse gives <ctrl> as Key.ctrl but <ctrl_l> as its KeyCode, so both forms are listed.
+MODIFIERS = frozenset(key for name in ("ctrl", "ctrl_l", "ctrl_r", "alt", "alt_l", "alt_r", "alt_gr",
+                                       "shift", "shift_l", "shift_r", "cmd", "cmd_l", "cmd_r")
+                      for key in (Key[name], Key[name].value))
 
 
 class ConfigChanged(Exception):
@@ -50,7 +54,8 @@ class RenameError(Exception):
 def load(path: Path) -> tuple[dict, float]:
     """The config and the file's modification time, for ``save``'s change check."""
     mtime = path.stat().st_mtime
-    return json.loads(path.read_text(encoding="utf-8")), mtime
+    # utf-8-sig also reads a file that Notepad saved with a byte order mark.
+    return json.loads(path.read_text(encoding="utf-8-sig")), mtime
 
 
 def save(path: Path, cfg: dict, loaded_mtime: float | None = None) -> float:
@@ -116,6 +121,11 @@ def _validate_domain(name: str, domain, errors: dict[str, str]) -> frozenset | N
     keys = _hotkey_keys(domain.get("hotkey"))
     if keys is None:
         errors[f"{path}.hotkey"] = "Not a valid hotkey, e.g. <ctrl>+<alt>+d."
+    elif not keys & MODIFIERS:
+        # A hotkey is global: without a modifier the Domain would open whenever that key is typed.
+        errors[f"{path}.hotkey"] = ("Use at least one of <ctrl>, <alt>, <shift> or <cmd>, "
+                                    "e.g. <ctrl>+<alt>+d.")
+        return None
     return keys
 
 

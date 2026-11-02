@@ -9,11 +9,13 @@ import config_store
 from config_store import (LIVE_KEYS, RANGES, ConfigChanged, RenameError, known_signs, load,
                           rename_sign, save, validate)
 
+# A frozen copy: the real config.json is the user's, and changes as they use the settings window.
+FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config.json"
 REPO_CONFIG = Path(__file__).resolve().parent.parent / "config.json"
 
 
 def valid_cfg() -> dict:
-    return copy.deepcopy(json.loads(REPO_CONFIG.read_text(encoding="utf-8")))
+    return copy.deepcopy(json.loads(FIXTURE_CONFIG.read_text(encoding="utf-8")))
 
 
 def test_save_is_atomic_and_keeps_backup(tmp_path):
@@ -151,7 +153,33 @@ def test_validate_accepts_config_without_optional_sections():
 
 
 def test_validate_accepts_repo_config():
-    assert validate(valid_cfg()) == {}
+    cfg, _ = load(REPO_CONFIG)      # the real file: the app must start with what ships
+    assert validate(cfg) == {}
+
+
+def test_validate_requires_a_modifier_in_domain_hotkeys():
+    cfg = valid_cfg()
+    cfg["domains"]["unlimited_void"]["hotkey"] = "d"
+    cfg["domains"]["malevolent_shrine"]["hotkey"] = "<f9>"
+    cfg["domains"]["idle_death_gamble"]["hotkey"] = "<shift>+<f9>"
+    errors = validate(cfg)
+    message = "Use at least one of <ctrl>, <alt>, <shift> or <cmd>, e.g. <ctrl>+<alt>+d."
+    assert errors == {"domains.unlimited_void.hotkey": message,
+                      "domains.malevolent_shrine.hotkey": message}
+
+
+def test_validate_accepts_left_and_right_modifiers():
+    cfg = valid_cfg()
+    cfg["domains"]["unlimited_void"]["hotkey"] = "<ctrl_l>+d"
+    cfg["domains"]["malevolent_shrine"]["hotkey"] = "<cmd_r>+s"
+    assert validate(cfg) == {}
+
+
+def test_load_accepts_a_file_saved_with_a_bom(tmp_path):
+    p = tmp_path / "config.json"
+    p.write_text('{"fps": 30}', encoding="utf-8-sig")     # Notepad's "UTF-8 with BOM"
+    cfg, mtime = load(p)
+    assert cfg == {"fps": 30} and mtime == p.stat().st_mtime
 
 
 def test_live_keys_and_ranges_are_declared():

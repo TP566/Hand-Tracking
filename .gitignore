@@ -11,3 +11,5 @@ videos/*
 *.webm
 *.avi
 .app.lock
+config.json.bak
+config.json.tmp

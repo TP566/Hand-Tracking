@@ -24,7 +24,11 @@ from learned_signs import build_gestures
 from live_config import ConfigWatcher, apply_live
 from pipeline import QUALITY_LEVELS, CameraReader, QualityGovernor, Stats, Worker
 from settings_window import launch_settings
-from tray import start_tray
+
+try:
+    from tray import start_tray
+except ImportError:     # an install set up before the tray existed has no pystray yet
+    start_tray = None
 
 ROOT = Path(__file__).parent
 MODELS = ROOT / "models"
@@ -34,10 +38,24 @@ VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
 HAND_DETECT_RATE = 30  # hand detections per second at most
 PREVIEW_WINDOW = "Domain Expansion (preview)"
 QUIT = "__quit__"  # posted by the tray's Quit, handled by the main loop
+TRAY_MISSING = "The tray icon needs new packages: double-click setup.bat again to install them."
 
 
 def load_config() -> dict:
-    return json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+    # utf-8-sig also reads a file that Notepad saved with a byte order mark.
+    return json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+
+
+def open_tray(on_quit: Callable[[], None]) -> Optional[object]:
+    """The tray icon, or None when it cannot be shown; the app runs on without it (Q quits)."""
+    if start_tray is None:
+        print(TRAY_MISSING)
+        return None
+    try:
+        return start_tray(on_settings=launch_settings, on_quit=on_quit)
+    except Exception as exc:
+        print(f"Could not show the tray icon ({exc}). Press 'q' in the preview to quit.")
+        return None
 
 
 def title(cfg: dict, name: str) -> str:
@@ -170,15 +188,17 @@ def take_app_lock(attempts: int = 3, delay_sec: float = 0.2) -> AppLock:
 
 def main() -> None:
     show_stats = "--stats" in sys.argv
+    # Watching starts before the file is read, so a save made while the app loads is still applied.
+    watcher = ConfigWatcher(ROOT / "config.json")
     cfg = load_config()
     app_lock = take_app_lock()
     try:
-        run(cfg, show_stats)
+        run(cfg, show_stats, watcher)
     finally:
         app_lock.release()
 
 
-def run(cfg: dict, show_stats: bool) -> None:
+def run(cfg: dict, show_stats: bool, watcher: ConfigWatcher) -> None:
     ensure_models()
     cap = open_camera(cfg)
     ok, frame = cap.read()
@@ -245,7 +265,6 @@ def run(cfg: dict, show_stats: bool) -> None:
     preview_w = min(width, cfg.get("preview_width", 640))
     preview_scale = preview_w / width
     preview_open = False
-    watcher = ConfigWatcher(ROOT / "config.json")
     was_active = False
     seen = 0
     next_report = time.monotonic() + 5
@@ -254,7 +273,7 @@ def run(cfg: dict, show_stats: bool) -> None:
     tray = None
     try:
         hotkeys.start()
-        tray = start_tray(on_settings=launch_settings, on_quit=lambda: post(QUIT))
+        tray = open_tray(on_quit=lambda: post(QUIT))
         try:
             cam_ctx = pyvirtualcam.Camera(width, height, fps, backend="obs",
                                           fmt=pyvirtualcam.PixelFormat.BGR)
@@ -293,7 +312,10 @@ def run(cfg: dict, show_stats: bool) -> None:
                     preview_w = min(width, cfg["preview_width"])
                     preview_scale = preview_w / width
                     if preview_open and not cfg["show_preview"]:
-                        cv2.destroyWindow(PREVIEW_WINDOW)
+                        try:
+                            cv2.destroyWindow(PREVIEW_WINDOW)
+                        except cv2.error:
+                            pass    # the window is already gone; OpenCV 5 raises then
                         cv2.waitKey(1)
                         preview_open = False
                     if result.quality_changed:

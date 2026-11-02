@@ -30,6 +30,8 @@ Either:
 - Click the green **Code** button on GitHub → **Download ZIP**, then unzip it somewhere (for example `Documents\Hand-Tracking`), **or**
 - With Git: `git clone https://github.com/TP566/Hand-Tracking.git`
 
+To update later, run `git pull` in the project folder (or download the ZIP again). After updating, double-click **`setup.bat`** again: a new version can need new packages.
+
 ### Step 2: Install OBS Studio
 
 Just install it; that adds the **OBS Virtual Camera** device to your computer. You don't need to open OBS to use this app.

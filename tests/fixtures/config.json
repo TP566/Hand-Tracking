@@ -1,0 +1,42 @@
+{
+  "camera_index": 0,
+  "width": 1280,
+  "height": 720,
+  "camera_fps": 60,
+  "fps": 30,
+  "quality": "auto",
+  "hold_frames": 12,
+  "miss_tolerance": 3,
+  "cooldown_sec": 1.5,
+  "mirror_preview": true,
+  "show_preview": true,
+  "preview_width": 640,
+  "domains": {
+    "unlimited_void": {
+      "video": "",
+      "keywords": ["gojo", "void", "unlimited"],
+      "loop_start_sec": 9.5,
+      "loop_end_sec": null,
+      "hotkey": "<ctrl>+<alt>+d"
+    },
+    "malevolent_shrine": {
+      "video": "",
+      "keywords": ["sukuna", "shrine", "malevolent"],
+      "loop_start_sec": 3.8,
+      "loop_end_sec": null,
+      "hotkey": "<ctrl>+<alt>+s"
+    },
+    "idle_death_gamble": {
+      "title": "Idle Death Gamble",
+      "video": "",
+      "keywords": ["hakari", "gamble", "idle"],
+      "loop_start_sec": 0.0,
+      "loop_end_sec": null,
+      "hotkey": "<ctrl>+<alt>+h"
+    }
+  },
+  "actions": {
+    "mute": {"keys": "ctrl+shift+f9"},
+    "deafen": {"keys": "ctrl+shift+f10"}
+  }
+}

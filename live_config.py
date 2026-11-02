@@ -68,7 +68,7 @@ class ConfigWatcher:
         if mtime is None or mtime == self._seen_mtime:
             return None
         try:
-            text = self.path.read_text(encoding="utf-8")
+            text = self.path.read_text(encoding="utf-8-sig")    # also a file saved with a BOM
         except (OSError, UnicodeDecodeError):
             return None     # mid-replace or locked: try again on the next poll
         self._seen_mtime = mtime
@@ -106,8 +106,11 @@ def apply_live(old: dict, new: dict, triggers: dict[str, HoldTrigger], governor:
         elif key == "quality":
             result.quality_changed = governor.set_mode(_value(new, key))
         elif key == "actions":
+            # Domains change only on restart, so an action may not take a running Domain's name
+            # (nor a saved new one's) until then.
+            running_and_saved = {**old.get("domains", {}), **new.get("domains", {})}
             try:
-                actions.actions = pc_actions.validate(_value(new, key), new.get("domains", {}))
+                actions.actions = pc_actions.validate(_value(new, key), running_and_saved)
             except SystemExit as exc:
                 result.warnings.append(f"{exc}; keeping the current actions")
                 continue
