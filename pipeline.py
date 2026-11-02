@@ -174,6 +174,19 @@ class QualityGovernor:
         self._ignore_until = clock() + warmup_sec
         self._slow_since: Optional[float] = None
 
+    def set_mode(self, mode: str) -> bool:
+        """Switch mode at runtime; True when the quality level changed.
+
+        "high" goes to full quality and "low" to the lowest level; "auto" keeps the
+        current level and resumes stepping down from there.
+        """
+        self.mode = mode
+        level = {"high": 0, "low": len(QUALITY_LEVELS) - 1}.get(mode, self.level)
+        self._slow_since = None
+        changed = level != self.level
+        self.level = level
+        return changed
+
     def update(self, fps: float, target_fps: float) -> bool:
         """Feed the current output fps and achievable target; True when the level just dropped."""
         if self.mode != "auto" or self.level == len(QUALITY_LEVELS) - 1:

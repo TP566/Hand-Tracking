@@ -149,3 +149,12 @@ def test_governor_high_and_low_modes():
     high = QualityGovernor("high", clock=clock)
     assert run_governor(high, clock, 5, 30, 30) == 0 and high.level == 0
     assert QualityGovernor("low", clock=clock).level == len(QUALITY_LEVELS) - 1
+
+
+def test_governor_set_mode():
+    gov = QualityGovernor("auto")
+    gov.level = 2
+    assert gov.set_mode("high") and gov.level == 0 and gov.mode == "high"
+    assert gov.set_mode("low") and gov.level == len(QUALITY_LEVELS) - 1 and gov.mode == "low"
+    assert not gov.set_mode("auto") and gov.level == len(QUALITY_LEVELS) - 1 and gov.mode == "auto"
+    assert not gov.set_mode("low")      # already at the last level
