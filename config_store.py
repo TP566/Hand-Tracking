@@ -6,6 +6,7 @@ and keeps the previous file as ``config.json.bak``; keys this module does not
 know about are written back untouched.
 """
 
+import copy
 import json
 import os
 import shutil
@@ -39,6 +40,10 @@ REQUIRED_KEYS = ("camera_index", "width", "height", "fps", "hold_frames", "coold
 
 class ConfigChanged(Exception):
     """config.json was modified by someone else after it was loaded."""
+
+
+class RenameError(Exception):
+    """A sign could not be renamed; the message says why, in words for the user."""
 
 
 def load(path: Path) -> tuple[dict, float]:
@@ -168,3 +173,60 @@ def known_signs(cfg: dict, samples_dir: Path) -> list[str]:
               if samples_dir.is_dir() else [])
     names = set(GESTURES) | set(cfg.get("domains", {})) | set(taught)
     return sorted(names - {NONE_LABEL})
+
+
+def _move_back(moved_to: Path, moved_from: Path) -> None:
+    """Undo a folder move after a failed save; says where the recordings are if it cannot."""
+    try:
+        os.replace(moved_to, moved_from)
+    except OSError as exc:
+        raise RenameError(f"The config was not changed, but the recordings could not be moved "
+                          f"back from {moved_to} to {moved_from}: {exc}") from exc
+
+
+def rename_sign(cfg: dict, kind: str, old: str, new: str, config_path: Path,
+                samples_dir: Path, loaded_mtime: float | None = None) -> tuple[dict, float]:
+    """Rename a Domain or action together with its ``samples/<name>`` recordings.
+
+    ``kind`` is "domain" or "action". All or nothing: on any refusal or failure the
+    disk and ``cfg`` are left as they were, and ``RenameError`` is raised. Returns
+    the saved config (the renamed key keeps its position) and its new mtime.
+    """
+    section = {"domain": "domains", "action": "actions"}.get(kind)
+    if section is None:
+        raise RenameError(f"Unknown kind of sign: {kind}.")
+    if old in GESTURES:
+        raise RenameError(f"{old} is a built-in sign and cannot be renamed.")
+    if old not in cfg.get(section, {}):
+        raise RenameError(f"There is no {kind} called {old}.")
+    if not SIGN_NAME.match(new):
+        raise RenameError("Name may only use letters, numbers and underscores.")
+    source, target = samples_dir / old, samples_dir / new
+    if (new in GESTURES or new == NONE_LABEL or new in cfg.get("domains", {})
+            or new in cfg.get("actions", {}) or target.exists()):
+        raise RenameError(f"The name {new} is already used; pick a different one.")
+
+    renamed = copy.deepcopy(cfg)
+    renamed[section] = {(new if key == old else key): value
+                        for key, value in renamed[section].items()}
+    move_folder = source.is_dir()
+    if move_folder:
+        try:
+            os.replace(source, target)
+        except PermissionError as exc:
+            raise RenameError("Could not move the recordings folder; it is in use. Close "
+                              "teach.bat/record.bat and try again.") from exc
+        except OSError as exc:
+            raise RenameError(f"Could not move the recordings folder: {exc}") from exc
+    try:
+        mtime = save(config_path, renamed, loaded_mtime)
+    except ConfigChanged as exc:
+        if move_folder:
+            _move_back(target, source)
+        raise RenameError(f"{config_path.name} was changed outside this window; "
+                          "reload it and try again.") from exc
+    except OSError as exc:
+        if move_folder:
+            _move_back(target, source)
+        raise RenameError(f"Could not save {config_path.name}: {exc}") from exc
+    return renamed, mtime

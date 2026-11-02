@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from config_store import LIVE_KEYS, RANGES, ConfigChanged, known_signs, load, save, validate
+import config_store
+from config_store import (LIVE_KEYS, RANGES, ConfigChanged, RenameError, known_signs, load,
+                          rename_sign, save, validate)
 
 REPO_CONFIG = Path(__file__).resolve().parent.parent / "config.json"
 
@@ -164,3 +166,128 @@ def test_known_signs_includes_taught_folders(tmp_path):
 
 def test_known_signs_without_samples_dir(tmp_path):
     assert "unlimited_void" in known_signs({}, tmp_path / "missing")
+
+
+def rename_setup(tmp_path):
+    """A saved config with domain ``hakari`` (second slot) and action ``mute``, plus recordings."""
+    cfg = valid_cfg()
+    items = list(cfg["domains"].items())
+    items.insert(1, ("hakari", {"video": "", "keywords": [], "loop_start_sec": 0,
+                                "loop_end_sec": None, "hotkey": "<ctrl>+<alt>+h"}))
+    cfg["domains"] = dict(items)
+    cfg["actions"] = {"mute": {"keys": "a"}}
+    cfg_path = tmp_path / "config.json"
+    save(cfg_path, cfg)
+    samples = tmp_path / "samples"
+    for label in ("hakari", "mute"):
+        (samples / label).mkdir(parents=True)
+        (samples / label / "a.json").write_text("{}", encoding="utf-8")
+    loaded, mtime = load(cfg_path)
+    return loaded, mtime, cfg_path, samples
+
+
+def test_rename_domain_moves_recordings_and_config(tmp_path):
+    cfg, mtime, cfg_path, samples = rename_setup(tmp_path)
+    old_order = list(cfg["domains"])
+    old_hotkey = cfg["domains"]["hakari"]["hotkey"]
+    cfg2, new_mtime = rename_sign(cfg, "domain", "hakari", "gamble", cfg_path, samples, mtime)
+    assert "gamble" in cfg2["domains"] and "hakari" not in cfg2["domains"]
+    assert list(cfg2["domains"]) == [("gamble" if k == "hakari" else k) for k in old_order]
+    assert (samples / "gamble" / "a.json").exists() and not (samples / "hakari").exists()
+    on_disk = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert on_disk["domains"]["gamble"]["hotkey"] == old_hotkey
+    assert on_disk == cfg2
+    assert new_mtime == cfg_path.stat().st_mtime
+    assert "hakari" in cfg["domains"]
+
+
+def test_rename_action_moves_recordings(tmp_path):
+    cfg, mtime, cfg_path, samples = rename_setup(tmp_path)
+    cfg2, _ = rename_sign(cfg, "action", "mute", "silence", cfg_path, samples, mtime)
+    assert cfg2["actions"] == {"silence": {"keys": "a"}}
+    assert json.loads(cfg_path.read_text(encoding="utf-8"))["actions"] == {"silence": {"keys": "a"}}
+    assert (samples / "silence" / "a.json").exists() and not (samples / "mute").exists()
+
+
+def test_rename_without_recordings_folder(tmp_path):
+    cfg, mtime, cfg_path, samples = rename_setup(tmp_path)
+    (samples / "hakari" / "a.json").unlink()
+    (samples / "hakari").rmdir()
+    cfg2, _ = rename_sign(cfg, "domain", "hakari", "gamble", cfg_path, samples, mtime)
+    assert "gamble" in cfg2["domains"]
+    assert not (samples / "gamble").exists()
+
+
+def test_rename_refuses_builtin_sign(tmp_path):
+    cfg, mtime, cfg_path, samples = rename_setup(tmp_path)
+    before = cfg_path.read_text(encoding="utf-8")
+    with pytest.raises(RenameError, match="built-in"):
+        rename_sign(cfg, "domain", "unlimited_void", "void", cfg_path, samples, mtime)
+    assert cfg_path.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize("new", ["malevolent_shrine", "mute", "taken_folder", "bad name!",
+                                 "", "none", "hakari"])
+def test_rename_refuses_taken_or_invalid_names(tmp_path, new):
+    cfg, mtime, cfg_path, samples = rename_setup(tmp_path)
+    (samples / "taken_folder").mkdir()
+    before_text = cfg_path.read_text(encoding="utf-8")
+    before_cfg = copy.deepcopy(cfg)
+    with pytest.raises(RenameError):
+        rename_sign(cfg, "domain", "hakari", new, cfg_path, samples, mtime)
+    assert cfg_path.read_text(encoding="utf-8") == before_text
+    assert cfg == before_cfg
+    assert (samples / "hakari" / "a.json").exists()
+
+
+def test_rename_refuses_unknown_sign_or_kind(tmp_path):
+    cfg, mtime, cfg_path, samples = rename_setup(tmp_path)
+    with pytest.raises(RenameError):
+        rename_sign(cfg, "domain", "ghost", "gamble", cfg_path, samples, mtime)
+    with pytest.raises(RenameError):
+        rename_sign(cfg, "gesture", "hakari", "gamble", cfg_path, samples, mtime)
+
+
+def test_rename_rolls_back_when_folder_move_fails(tmp_path, monkeypatch):
+    cfg, mtime, cfg_path, samples = rename_setup(tmp_path)
+    original_text = cfg_path.read_text(encoding="utf-8")
+    before_cfg = copy.deepcopy(cfg)
+    real_replace = os.replace
+
+    def fail_for_folders(src, dst):
+        if Path(src).is_dir():
+            raise PermissionError("in use")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(config_store.os, "replace", fail_for_folders)
+    with pytest.raises(RenameError, match="in use"):
+        rename_sign(cfg, "domain", "hakari", "gamble", cfg_path, samples, mtime)
+    assert cfg_path.read_text(encoding="utf-8") == original_text
+    assert (samples / "hakari").exists() and not (samples / "gamble").exists()
+    assert cfg == before_cfg
+
+
+def test_rename_rolls_back_folder_when_save_fails(tmp_path, monkeypatch):
+    cfg, mtime, cfg_path, samples = rename_setup(tmp_path)
+    original_text = cfg_path.read_text(encoding="utf-8")
+    before_cfg = copy.deepcopy(cfg)
+
+    def failing_save(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(config_store, "save", failing_save)
+    with pytest.raises(RenameError):
+        rename_sign(cfg, "domain", "hakari", "gamble", cfg_path, samples, mtime)
+    assert (samples / "hakari" / "a.json").exists() and not (samples / "gamble").exists()
+    assert cfg_path.read_text(encoding="utf-8") == original_text
+    assert cfg == before_cfg
+
+
+def test_rename_rolls_back_folder_when_config_changed_on_disk(tmp_path):
+    cfg, mtime, cfg_path, samples = rename_setup(tmp_path)
+    cfg_path.write_text(cfg_path.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    os.utime(cfg_path, (mtime + 10, mtime + 10))
+    with pytest.raises(RenameError, match="outside"):
+        rename_sign(cfg, "domain", "hakari", "gamble", cfg_path, samples, mtime)
+    assert (samples / "hakari" / "a.json").exists() and not (samples / "gamble").exists()
+    assert "hakari" in json.loads(cfg_path.read_text(encoding="utf-8"))["domains"]
