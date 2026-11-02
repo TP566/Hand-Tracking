@@ -60,6 +60,32 @@ Double-click **`run.bat`**.
 
 A **preview window** opens showing your camera. The preview is only for you; the extras drawn on it (hand outline, status text) are never sent to the call.
 
+While the app runs, a small purple **tray icon** (round, with a white ring) sits near the clock. If you don't see it, click the **^** arrow in the taskbar. Right-click it for **Settings** and **Quit**. The app only runs once: starting it a second time says it is already running.
+
+### Settings window
+
+Double-click **`settings.bat`** to change the app's settings without editing any file. It has four tabs:
+
+| Tab | What you can change |
+|---|---|
+| **General** | Camera, resolution, frame rates, quality, and the preview (on or off, width, mirror) |
+| **Signs** | How long a sign must be held (**Hold frames**), how many frames it may drop out (**Miss tolerance**), and the **Cooldown** after a sign fires |
+| **Domains** | Each Domain's title, video, keywords, loop start and end, and hotkey. **Add Domain**, **Remove** and **Rename** |
+| **Actions** | The PC action (keys, type text, open) for each sign |
+
+Click **Save** (or press **Ctrl + S**). The line at the bottom says what happened. If a field is marked in red, fix it and save again. Nothing is written until every field is valid, and the previous file is kept as `config.json.bak`.
+
+**Start app** starts the app for you. It is greyed out while the app is running. To open the window while the app is running, use **Settings** in the tray icon.
+
+Each group of settings is labelled:
+
+- **Live**: applies to the running app within about a second of saving. These are hold frames, miss tolerance, cooldown, quality, the preview (on or off, width, mirror) and the actions. You can tune them during a call.
+- **Applies on restart**: saved now, but only used the next time the app starts. These are the camera, resolution, camera fps, output fps, the Domains and sign names. After saving, the window lists what needs a restart. To restart, use **Quit** in the tray icon (or press **Q** in the preview), then click **Start app**.
+
+**Rename** (Domains and Actions tabs) changes a sign's name and moves its recordings from `samples\<old name>` to `samples\<new name>`. It saves `config.json` at once, and asks first if you have other unsaved changes. The two built-in Domains, Unlimited Void and Malevolent Shrine, cannot be renamed because their sign is built in; you can only change their **Title**.
+
+You can still edit `config.json` by hand, and the app picks up the live settings from it the same way. The window warns you if the file changed while it was open.
+
 ### Step 6: Use it in your call
 
 In **Discord**: **User Settings (⚙) → Voice & Video → Camera → OBS Virtual Camera**.
@@ -91,9 +117,9 @@ Hold the sign for about half a second. Its pink bar in the preview fills up, and
 
 Only one Domain can be open at a time. While one is open, the other signs are ignored until you close it.
 
-**Hakari: Idle Death Gamble** has no built-in sign: you teach it your own (see *Teach a new sign* below). Until then, its hotkey works. Also set `loop_start_sec` for its video in `config.json` (the second where the Domain is fully open).
+**Hakari: Idle Death Gamble** has no built-in sign: you teach it your own (see *Teach a new sign* below). Until then, its hotkey works. Also set **Loop start** for its video on the **Domains** tab of the settings window (the second where the Domain is fully open).
 
-**To quit:** click the preview window and press **Q**, or close the black console window.
+**To quit:** click the preview window and press **Q**, or right-click the tray icon and choose **Quit**, or close the black console window.
 
 ### Tips for reliable detection
 
@@ -131,7 +157,7 @@ Any sign can be taught by showing it to the app. No coding is needed.
 
 ### Control your PC with signs
 
-A sign can also press a shortcut, type text or open something. These are listed under `actions` in `config.json`:
+A sign can also press a shortcut, type text or open something. Set these on the **Actions** tab of the settings window (**Add action**, pick the sign, the kind and the value), or by hand under `actions` in `config.json`:
 
 ```json
 "actions": {
@@ -149,15 +175,19 @@ A sign can also press a shortcut, type text or open something. These are listed 
 **Discord mute / deafen with a sign:**
 1. In Discord: **User Settings (⚙) → Keybinds → Add a Keybind**. Set **Toggle Mute** to **Ctrl + Shift + F9**, and add another for **Toggle Deafen** set to **Ctrl + Shift + F10**. These work even when Discord isn't the active window.
 2. Teach the signs: `teach.bat mute` and `teach.bat deafen`.
-3. Start `run.bat`. Holding the mute sign now mutes or unmutes you in Discord.
+3. Add the two actions on the **Actions** tab (or in `config.json`), then start `run.bat`. Holding the mute sign now mutes or unmutes you in Discord. Actions are live, so you can add or change them while the app runs.
 
 Actions work while a Domain is open too. A sign name can be used for a Domain or for an action, not both.
 
 ### Add your own Domain
 
 1. Put the video in the `videos` folder.
-2. In `config.json`, copy one of the blocks under `domains`, give it a new name (for example `chimera_shadow_garden`), and set its `title`, `keywords` (words in the video's file name), `loop_start_sec` and `hotkey`.
-3. Teach its sign: `teach.bat chimera_shadow_garden` (the same name as the block).
+2. Open **`settings.bat`**, go to the **Domains** tab and click **Add Domain**. Type a name (letters, digits and `_` only, for example `chimera_shadow_garden`). The name is also its sign's name.
+3. Fill in its fields: **Title**, **Video** (click **Browse…**, or leave it empty to find the video by **Keywords**, words in the video's file name), **Loop start** and **Hotkey**. Click **Save**.
+4. Teach its sign: `teach.bat chimera_shadow_garden` (the same name as the Domain).
+5. Restart the app. Domains are read when it starts.
+
+If you teach the sign first, **Add Domain** finds the recordings and you can skip step 4. Editing `config.json` by hand also works: copy one of the blocks under `domains` and give it a new name.
 
 ---
 
@@ -166,15 +196,15 @@ Actions work while a Domain is open too. A sign name can be used for a Domain or
 | Problem | Fix |
 |---|---|
 | `setup.bat` says **Python was not found** | Install Python and tick **"Add python.exe to PATH"**. Then open a new window and run `setup.bat` again |
-| **Could not open camera** | Close other apps using the webcam (Discord, Zoom, Camera app). If you have more than one camera, set `camera_index` in `config.json` to `1`, `2`... |
+| **Could not open camera** | Close other apps using the webcam (Discord, Zoom, Camera app). If you have more than one camera, set **Camera index** (General tab of the settings window) or `camera_index` in `config.json` to `1`, `2`... |
 | **Could not start the OBS Virtual Camera** | If OBS is open with the virtual camera on, click **Stop Virtual Camera** (or close OBS), then run the app again. If OBS isn't installed, install it |
 | OBS says **"Failed to start virtual camera"** | Normal while the app is running: the app is already using the virtual camera. You don't need OBS's button at all |
 | **No Domain videos found**, or a sign shows **(no video)** | Put the video in the `videos` folder with a matching file name (see Step 4) |
 | Malevolent Shrine **never triggers** | Check that both hands are outlined, the fingertips touch at the top, and the wrists are apart. Then try `record.bat` (see *Help improve detection*) |
 | Discord shows a **black screen** or "OBS Virtual Camera" shows nothing | Make sure the app is running (preview window open) *before* selecting the camera in Discord |
-| The sign **never triggers** | Check that your hand is outlined in the preview, improve lighting, and cross the fingers more clearly. You can lower `hold_frames` in `config.json` |
-| It **triggers by accident** | Raise `hold_frames` in `config.json` (for example to `20`) |
-| The video **loops from the wrong place** | Change `loop_start_sec` in `config.json` to the second where your video's Domain is fully open |
+| The sign **never triggers** | Check that your hand is outlined in the preview, improve lighting, and cross the fingers more clearly. You can lower **Hold frames** on the Signs tab (`hold_frames` in `config.json`) |
+| It **triggers by accident** | Raise **Hold frames** on the Signs tab (`hold_frames` in `config.json`), for example to `20` |
+| The video **loops from the wrong place** | Change **Loop start** on the Domains tab (`loop_start_sec` in `config.json`) to the second where your video's Domain is fully open |
 | Low FPS / choppy video | See *Performance* below |
 
 ---
@@ -194,7 +224,7 @@ If it is still slow:
 - **Plug in the charger.** Laptops slow down a lot on battery.
 - Set the Windows power mode to **Best performance** (Settings → System → Power & battery).
 - Close other apps that use the camera or a lot of CPU (games, browsers with many tabs).
-- Set `width` to `960` and `height` to `540` in `config.json`.
+- Set the camera width and height to `960` and `540` (General tab, or `width` and `height` in `config.json`).
 
 To report performance, run the app from a terminal with `.venv\Scripts\python.exe main.py --stats`. It prints a timing line every 5 seconds that you can copy and send.
 
@@ -202,7 +232,7 @@ To report performance, run the app from a terminal with `.venv\Scripts\python.ex
 
 ## Settings (`config.json`)
 
-Open `config.json` with Notepad to change these. Restart the app after saving.
+Use the settings window (`settings.bat`) to change these, or edit `config.json` by hand (for example with Notepad). The settings marked live in the window are picked up by the running app after you save; the others need a restart. Each save keeps the old file as `config.json.bak`.
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -245,6 +275,10 @@ Each stage runs on its own thread (`pipeline.py`): the main loop never waits on 
 4. `domain.py` plays the opening once, then loops the open Domain; `DomainManager` keeps one Domain open at a time. `PrefetchSource` decodes the video on a background thread, each frame once, and `video_cache.py` downscales large videos once.
 5. MediaPipe `ImageSegmenter` (landscape selfie model) cuts you out; `compositor.py` puts the video behind you.
 6. `pyvirtualcam` sends the result to the OBS Virtual Camera.
+
+### Settings window and tray icon
+
+`settings_window.py` is a Tkinter editor that runs as its own process (`settings.bat`, or **Settings** in the tray icon). It only reads and writes `config.json`; it never talks to the running app. `config_store.py` holds the rules (load, validate, atomic save with a `config.json.bak`, and renaming a sign together with its `samples/` folder). In the app, `live_config.py` watches `config.json` and applies the keys in `config_store.LIVE_KEYS` mid-call; anything else is reported as needing a restart. `tray.py` draws the tray icon (`pystray` and Pillow) and `instance.py` holds the single-instance lock that stops a second copy of the app and tells the settings window whether to enable **Start app**.
 
 ### Manual setup
 
