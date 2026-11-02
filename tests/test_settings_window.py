@@ -307,6 +307,21 @@ def test_start_button_follows_app_lock(window, monkeypatch):
     assert str(window.start_button.cget("state")) == "normal"
 
 
+def test_start_app_uses_console_python_under_pythonw(window, monkeypatch, tmp_path):
+    (tmp_path / "python.exe").touch()
+    (tmp_path / "pythonw.exe").touch()
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "pythonw.exe"))
+    monkeypatch.setattr(settings_window, "app_running", lambda path: False)
+    calls = []
+    monkeypatch.setattr(settings_window.subprocess, "Popen",
+                        lambda args, **kw: calls.append((args, kw)))
+    window.start_app()
+    assert len(calls) == 1
+    args, kw = calls[0]
+    assert args == [str(tmp_path / "python.exe"), str(settings_window.ROOT / "main.py")]
+    assert kw["creationflags"] == subprocess.CREATE_NEW_CONSOLE
+
+
 def test_video_path_relative_inside_project(tmp_path):
     inside = settings_window.ROOT / "videos" / "a.mp4"
     assert settings_window.video_value(str(inside)) == "videos/a.mp4"

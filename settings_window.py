@@ -44,13 +44,18 @@ REFRESH_MS = 2000
 START_GRACE_SEC = 15     # the app takes a while to load before it holds the lock
 
 
+def interpreter(name: str) -> str:
+    """``name`` (python.exe or pythonw.exe) from the running interpreter's folder, else that interpreter."""
+    path = Path(sys.executable).with_name(name)
+    return str(path) if path.exists() else sys.executable
+
+
 def launch_settings() -> None:
     """Open the settings window in its own process and return at once.
 
     It runs detached under pythonw.exe, so closing the app's console leaves it open.
     """
-    pythonw = Path(sys.executable).with_name("pythonw.exe")
-    subprocess.Popen([str(pythonw) if pythonw.exists() else sys.executable, str(Path(__file__).resolve())],
+    subprocess.Popen([interpreter("pythonw.exe"), str(Path(__file__).resolve())],
                      cwd=ROOT, creationflags=subprocess.DETACHED_PROCESS)
 
 
@@ -500,7 +505,8 @@ class SettingsWindow:
             answer = messagebox.askyesnocancel("Unsaved changes", "Save your changes before starting the app?")
             if answer is None or (answer and not self.save()):
                 return
-        subprocess.Popen([sys.executable, str(ROOT / "main.py")], cwd=ROOT,
+        # python.exe even when this window runs under pythonw.exe, so the app gets its own console.
+        subprocess.Popen([interpreter("python.exe"), str(ROOT / "main.py")], cwd=ROOT,
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
         self._start_grace = time.monotonic() + START_GRACE_SEC
         self.refresh_start()

@@ -217,8 +217,6 @@ def run(cfg: dict, show_stats: bool) -> None:
 
     hotkeys = keyboard.GlobalHotKeys({d["hotkey"]: (lambda n=name: post(n))
                                       for name, d in cfg["domains"].items()})
-    hotkeys.start()
-    tray = start_tray(on_settings=launch_settings, on_quit=lambda: post(QUIT))
 
     camera = CameraReader(cap)
     # Workers are capped: segmenting faster than frames are sent wastes CPU, and a fixed hand
@@ -253,7 +251,10 @@ def run(cfg: dict, show_stats: bool) -> None:
     next_report = time.monotonic() + 5
     decoded_at_report = 0
 
+    tray = None
     try:
+        hotkeys.start()
+        tray = start_tray(on_settings=launch_settings, on_quit=lambda: post(QUIT))
         try:
             cam_ctx = pyvirtualcam.Camera(width, height, fps, backend="obs",
                                           fmt=pyvirtualcam.PixelFormat.BGR)
@@ -369,7 +370,8 @@ def run(cfg: dict, show_stats: bool) -> None:
                 cam.sleep_until_next_frame()
     finally:
         hotkeys.stop()
-        tray.stop()
+        if tray is not None:
+            tray.stop()
         for thread in (camera, hand_worker, seg_worker):
             thread.stop()
             thread.join(timeout=2.0)
