@@ -5,3 +5,5 @@ pyvirtualcam>=0.15
 pynput>=1.8
 pyautogui>=0.9.54
 pytest>=9.0
+pystray>=0.19
+pillow>=10.0

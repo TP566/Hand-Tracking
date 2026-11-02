@@ -10,3 +10,4 @@ videos/*
 *.mkv
 *.webm
 *.avi
+.app.lock
