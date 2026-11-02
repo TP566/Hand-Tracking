@@ -7,9 +7,11 @@ Make a Domain Expansion hand sign in front of your webcam and your background tu
 - **Gojo: Unlimited Void** (one hand, index and middle fingers crossed)
 - **Sukuna: Malevolent Shrine** (two hands meeting at the fingertips)
 
-It It works in Discord, Zoom, Google Meet, Teams, OBS, or anything else that uses a webcam.
+It works in Discord, Zoom, Google Meet, Teams, OBS, or anything else that uses a webcam.
 
 > **Windows only** for now (it uses the OBS Virtual Camera driver).
+
+**Version:** see [`VERSION`](VERSION) and [`CHANGELOG.md`](CHANGELOG.md). **Release** versions (`v2.0.0`) are the reviewed, recommended ones; **beta** versions (`v2.1.0-beta.1`) are small updates to try before the next release. All versions are listed on GitHub under **Code → Tags**.
 
 ---
 
@@ -29,6 +31,8 @@ It It works in Discord, Zoom, Google Meet, Teams, OBS, or anything else that use
 Either:
 - Click the green **Code** button on GitHub → **Download ZIP**, then unzip it somewhere (for example `Documents\Hand-Tracking`), **or**
 - With Git: `git clone https://github.com/TP566/Hand-Tracking.git`
+
+To get a specific version, open **Tags** on GitHub, pick a version and download its ZIP, or with Git run `git checkout v2.0.0`.
 
 To update later, run `git pull` in the project folder (or download the ZIP again). After updating, double-click **`setup.bat`** again: a new version can need new packages.
 
